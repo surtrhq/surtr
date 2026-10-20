@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Game Session</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0E1013}
+a{color:inherit;text-decoration:none}
+.app{--bg:#0E1013;--s1:#151920;--s2:#1B2028;--line:#272E38;--tx:#E8EAED;--mu:#8B93A0;--ac:#F5A524;--ok:#3DD6A6;--hot:#FF6B5E;--cool:#4CC9F0;display:flex;flex-wrap:wrap;align-items:stretch;min-height:1000px;background:var(--bg);color:var(--tx);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;line-height:1.4}
+.side{flex:0 0 232px;box-sizing:border-box;background:#0A0C0F;border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:4px}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 14px;font-weight:600;letter-spacing:.14em;font-size:15px}
+.mark{width:22px;height:22px;border-radius:5px;background:var(--ac)}
+.nav{display:flex;align-items:center;gap:12px;padding:0 12px;min-height:44px;box-sizing:border-box;border-radius:6px;color:var(--mu)}
+.nav:hover{background:var(--s1);color:var(--tx)}
+.nav.on{background:var(--s2);color:var(--tx);box-shadow:inset 3px 0 0 var(--ac)}
+.nav svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.nav.sep{margin-top:14px}
+.sidefoot{margin-top:auto;padding:12px;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--mu)}
+.main{flex:999 1 560px;min-width:0;box-sizing:border-box;padding:24px 28px;display:flex;flex-direction:column;gap:20px}
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:22px;font-weight:600}
+.sub{color:var(--mu);font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;box-sizing:border-box;padding:0 18px;border-radius:6px;border:1px solid var(--line);background:var(--s2);color:var(--tx);font:inherit;font-weight:500;cursor:pointer}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#1A1200}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.lbl{font-size:11.5px;color:var(--mu);letter-spacing:.08em;text-transform:uppercase}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;border:1px solid var(--line);font-size:12px;color:var(--mu)}
+.chip.good{border-color:var(--ok);color:var(--ok)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg a{padding:0 14px;min-height:44px;display:flex;align-items:center;color:var(--mu)}
+.seg a.on{background:var(--s2);color:var(--tx);box-shadow:inset 0 -2px 0 var(--ac)}
+.game{position:relative;border:1px solid var(--line);border-radius:10px;background:#111826;aspect-ratio:16/9;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.game .ph{color:#46526a;font-size:14px;letter-spacing:.08em;text-transform:uppercase}
+.hud{position:absolute;top:16px;left:16px;width:230px;box-sizing:border-box;padding:10px 12px;border-radius:6px;background:rgba(8,10,14,.78);border:1px solid rgba(255,255,255,.08);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.55}
+.hud .fps{font-size:30px;font-weight:500;line-height:1.1}
+.hud .fps i{font-style:normal;font-size:12px;color:var(--mu);margin-left:4px}
+.hud .r{display:flex;justify-content:space-between}
+.hud .k{color:var(--mu)}
+.fld{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0}
+.fld label{color:var(--mu);font-size:13px}
+select{min-height:44px;box-sizing:border-box;background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:6px;padding:0 10px;font:inherit}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--ac);margin:0}
+input[type=range]{accent-color:var(--ac);width:140px}
+.ck{display:flex;align-items:center;gap:10px;min-height:32px}
+.kv{display:grid;grid-template-columns:1fr auto;gap:0}
+.kv div{padding:8px 0;border-top:1px solid var(--line)}
+.kv .v{text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.note{display:flex;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--s2);font-size:13px;color:var(--mu)}
+</style>
+</helmet>
+<div class="app" style="--ac: {{accent}}">
+  <aside class="side">
+    <div class="brand"><span class="mark"></span>SURTR</div>
+    <sc-for list="{{nav}}" as="item" hint-placeholder-count="13">
+      <a class="nav {{item.cls}}" href="{{item.href}}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{item.d}}"></path></svg>
+        {{item.label}}
+      </a>
+    </sc-for>
+    <div class="sidefoot"><b style="color:#E8EAED;font-weight:500">Privileged sensors off</b><br>PawnIO not installed. Core voltages unavailable.</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div>
+        <h1>Game Session</h1>
+        <div class="sub">Borderless window · frametimes captured without injection · sample data</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+        <nav class="seg" aria-label="Experience mode"><a href="Simple.dc.html">Simple</a><a class="on" href="#">Gaming</a><a href="Main.dc.html">Advanced</a><a href="Workstation.dc.html">Workstation</a></nav>
+        <span class="chip good">Anti-cheat safe mode</span>
+        <a class="btn pri" href="#">End Session</a>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+      <div style="flex:2 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">
+        <div class="game" role="img" aria-label="Placeholder for a game window with the Surtr overlay in the top-left corner showing 142 FPS, frametime graph, temperatures, load and memory.">
+          <span class="ph">Game window (placeholder)</span>
+          <div class="hud">
+            <div class="fps">142<i>FPS</i></div>
+            <div class="r"><span class="k">1% low</span><span>96</span></div>
+            <svg viewBox="0 0 200 36" preserveAspectRatio="none" style="width:100%;height:36px;display:block;margin:6px 0" aria-hidden="true"><polyline points="0,22 10,20 20,22 30,18 40,22 50,20 60,8 70,20 80,22 90,18 100,22 110,20 120,24 130,20 140,22 150,4 160,20 170,22 180,20 190,22 200,20" fill="none" stroke="#3DD6A6" stroke-width="1.5"></polyline></svg>
+            <div class="r"><span class="k">CPU</span><span>71°C · 38%</span></div>
+            <div class="r"><span class="k">GPU</span><span>68°C · 97%</span></div>
+            <div class="r"><span class="k">VRAM</span><span>9.8 / 16 GB</span></div>
+            <div class="r"><span class="k">RAM</span><span>18.2 GB</span></div>
+            <div class="r"><span class="k">GPU W</span><span>286 W</span></div>
+          </div>
+        </div>
+
+        <section class="card">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+            <span class="lbl">Frametime · last 60 s</span>
+            <span class="sub">Spikes are what you feel; the average hides them.</span>
+          </div>
+          <svg viewBox="0 0 760 200" style="width:100%;height:auto;display:block" role="img" aria-label="Frametime graph, mostly flat around 7 milliseconds with two spikes to 19 and 24 milliseconds.">
+            <g stroke="#272E38" stroke-width="1"><line x1="50" y1="20" x2="740" y2="20"></line><line x1="50" y1="70" x2="740" y2="70"></line><line x1="50" y1="120" x2="740" y2="120"></line><line x1="50" y1="170" x2="740" y2="170"></line></g>
+            <g font-size="11" fill="#8B93A0" font-family="IBM Plex Mono, monospace"><text x="8" y="24">30 ms</text><text x="8" y="74">20</text><text x="8" y="124">10</text><text x="22" y="174">0</text><text x="50" y="192">-60 s</text><text x="700" y="192">now</text></g>
+            <line x1="50" y1="124" x2="740" y2="124" stroke="#4CC9F0" stroke-width="1" stroke-dasharray="4 4"></line>
+            <text x="620" y="116" font-size="11" fill="#4CC9F0" font-family="IBM Plex Mono, monospace">avg 7.0 ms</text>
+            <polyline points="50,130 80,128 110,131 140,127 170,130 200,128 230,60 260,128 290,130 320,127 350,129 380,128 410,131 440,128 470,40 500,129 530,127 560,130 590,128 620,131 650,128 680,130 710,127 740,129" fill="none" stroke="#3DD6A6" stroke-width="2"></polyline>
+            <g font-size="11" fill="#FF6B5E" font-family="IBM Plex Mono, monospace"><text x="212" y="52">19 ms</text><text x="452" y="32">24 ms</text></g>
+          </svg>
+        </section>
+      </div>
+
+      <div style="flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:16px">
+        <section class="card">
+          <span class="lbl">Overlay</span>
+          <div style="margin-top:8px">
+            <div class="fld"><label for="pos">Position</label><select id="pos"><option>Top left</option><option>Top right</option><option>Bottom left</option></select></div>
+            <div class="fld"><label for="op">Opacity</label><input id="op" type="range" min="20" max="100" value="78"></div>
+            <div class="fld"><label for="hk">Toggle hotkey</label><span class="chip mono">Ctrl + Shift + O</span></div>
+            <div class="ck"><input id="m1" type="checkbox" checked><label for="m1">FPS and 1% low</label></div>
+            <div class="ck"><input id="m2" type="checkbox" checked><label for="m2">Frametime graph</label></div>
+            <div class="ck"><input id="m3" type="checkbox" checked><label for="m3">CPU and GPU temperature, load</label></div>
+            <div class="ck"><input id="m4" type="checkbox" checked><label for="m4">VRAM and RAM</label></div>
+            <div class="ck"><input id="m5" type="checkbox"><label for="m5">Power draw</label></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <span class="lbl">Session summary</span>
+          <div class="kv" style="margin-top:8px">
+            <div>Duration</div><div class="v">1:12:08</div>
+            <div>Average FPS</div><div class="v">138</div>
+            <div>1% / 0.1% low</div><div class="v">91 / 62</div>
+            <div>Peak CPU / GPU temp</div><div class="v">79 / 74 °C</div>
+            <div>Throttle events</div><div class="v">0</div>
+            <div>Stability</div><div class="v" style="color:#3DD6A6">No issues</div>
+          </div>
+        </section>
+
+        <div class="note">
+          <span class="mono" style="color:#F5A524">i</span>
+          <span>Works over borderless and windowed games. Exclusive fullscreen needs the optional hook overlay plugin, which some anti-cheat systems may block.</span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#F5A524","options":["#F5A524","#4CC9F0","#B6F23A","#FF6B5E"]},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const nav = [
+      { label: 'Overview', href: 'Main.dc.html', d: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z' },
+      { label: 'CPU', href: 'Cpu.dc.html', d: 'M7 7h10v10H7z M10 10h4v4h-4z M9 3v4 M15 3v4 M9 17v4 M15 17v4 M3 9h4 M3 15h4 M17 9h4 M17 15h4' },
+      { label: 'GPU', href: '#', d: 'M2 7h20v10H2z M15 12a3 3 0 1 0-6 0a3 3 0 0 0 6 0z M6 17v3 M18 17v3' },
+      { label: 'Memory', href: '#', d: 'M3 8h18v8H3z M7 8v4 M11 8v4 M15 8v4 M19 8v4 M6 16v2 M10 16v2 M14 16v2 M18 16v2' },
+      { label: 'Storage', href: '#', d: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3z M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
+      { label: 'Sensors', href: '#', d: 'M3 12h4l3-7 4 14 3-7h4' },
+      { label: 'Workstation', href: 'Workstation.dc.html', d: 'M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01', sep: true },
+      { label: 'Game Session', href: 'Game.dc.html', d: 'M6 9h12a4 4 0 0 1 4 4v1a3 3 0 0 1-5 2l-1-1H8l-1 1a3 3 0 0 1-5-2v-1a4 4 0 0 1 4-4z M8 11v4 M6 13h4 M16 12h.01 M18 14h.01', on: true },
+      { label: 'Stress Test', href: 'Stress.dc.html', d: 'M13 2L4 14h7l-1 8 9-12h-7z', sep: true },
+      { label: 'Tuning', href: 'Tuning.dc.html', d: 'M4 7h10 M18 7h2 M4 17h2 M10 17h10 M16 5v4 M8 15v4' },
+      { label: 'Benchmarks', href: '#', d: 'M5 20V10 M12 20V4 M19 20v-7' },
+      { label: 'Reports', href: 'Report.dc.html', d: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h7', sep: true },
+      { label: 'Connections', href: 'Connections.dc.html', d: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1' }
+    ].map(n => ({ ...n, cls: (n.on ? 'on' : '') + (n.sep ? ' sep' : '') }));
+    return { nav, accent: this.props.accent ?? '#F5A524' };
+  }
+}
+</script>
+</body>
+</html>

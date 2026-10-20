@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Workstation</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0E1013}
+a{color:inherit;text-decoration:none}
+.app{--bg:#0E1013;--s1:#151920;--s2:#1B2028;--line:#272E38;--tx:#E8EAED;--mu:#8B93A0;--ac:#F5A524;--ok:#3DD6A6;--hot:#FF6B5E;--cool:#4CC9F0;display:flex;flex-wrap:wrap;align-items:stretch;min-height:1000px;background:var(--bg);color:var(--tx);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;line-height:1.4}
+.side{flex:0 0 232px;box-sizing:border-box;background:#0A0C0F;border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:4px}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 14px;font-weight:600;letter-spacing:.14em;font-size:15px}
+.mark{width:22px;height:22px;border-radius:5px;background:var(--ac)}
+.nav{display:flex;align-items:center;gap:12px;padding:0 12px;min-height:44px;box-sizing:border-box;border-radius:6px;color:var(--mu)}
+.nav:hover{background:var(--s1);color:var(--tx)}
+.nav.on{background:var(--s2);color:var(--tx);box-shadow:inset 3px 0 0 var(--ac)}
+.nav svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.nav.sep{margin-top:14px}
+.sidefoot{margin-top:auto;padding:12px;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--mu)}
+.main{flex:999 1 560px;min-width:0;box-sizing:border-box;padding:24px 28px;display:flex;flex-direction:column;gap:20px}
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:22px;font-weight:600}
+.sub{color:var(--mu);font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;box-sizing:border-box;padding:0 18px;border-radius:6px;border:1px solid var(--line);background:var(--s2);color:var(--tx);font:inherit;font-weight:500;cursor:pointer}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#1A1200}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.lbl{font-size:11.5px;color:var(--mu);letter-spacing:.08em;text-transform:uppercase}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;border:1px solid var(--line);font-size:12px;color:var(--mu)}
+.chip.warn{border-color:var(--ac);color:var(--ac)}
+.chip.good{border-color:var(--ok);color:var(--ok)}
+.ch{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+.mets{display:flex;flex-wrap:wrap;gap:8px 26px;margin:12px 0}
+.met b{display:block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:24px;font-weight:500;line-height:1.15}
+.met b i{font-style:normal;font-size:12.5px;color:var(--mu);margin-left:3px}
+.met span{font-size:12px;color:var(--mu)}
+.warm{color:var(--ac)}
+.bar{height:8px;border-radius:4px;background:#272E38;overflow:hidden}
+.bar b{display:block;height:100%;background:var(--cool)}
+.bar.pw b{background:var(--ac)}
+.row2{display:flex;justify-content:space-between;font-size:12.5px;color:var(--mu);margin-bottom:6px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:500;color:var(--mu);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;padding:6px 8px 8px 0}
+td{padding:9px 8px 9px 0;border-top:1px solid var(--line)}
+td.r,th.r{text-align:right}
+.al{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+.tag{flex:none;font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:4px;border:1px solid var(--line)}
+.tag.w{color:var(--ac);border-color:var(--ac)}
+.tag.i{color:var(--cool);border-color:var(--cool)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg a{padding:0 14px;min-height:44px;display:flex;align-items:center;color:var(--mu)}
+.seg a.on{background:var(--s2);color:var(--tx);box-shadow:inset 0 -2px 0 var(--ac)}
+</style>
+</helmet>
+<div class="app" style="--ac: {{accent}}">
+  <aside class="side">
+    <div class="brand"><span class="mark"></span>SURTR</div>
+    <sc-for list="{{nav}}" as="item" hint-placeholder-count="13">
+      <a class="nav {{item.cls}}" href="{{item.href}}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{item.d}}"></path></svg>
+        {{item.label}}
+      </a>
+    </sc-for>
+    <div class="sidefoot"><b style="color:#E8EAED;font-weight:500">Daemon running</b><br>Prometheus endpoint on. API off.</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div>
+        <h1>Workstation</h1>
+        <div class="sub">2 GPUs · Ubuntu 24.04 · sample data · polling every 1 s</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+        <nav class="seg" aria-label="Experience mode"><a href="Simple.dc.html">Simple</a><a href="Game.dc.html">Gaming</a><a href="Main.dc.html">Advanced</a><a class="on" href="#">Workstation</a></nav>
+        <a class="btn" href="#">Export Run</a>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:16px">
+      <section class="card">
+        <div class="ch"><span class="lbl">GPU 0</span><span class="chip">RTX 4090 · 24 GB</span></div>
+        <div class="row2"><span>VRAM</span><span class="mono">21.4 / 24 GB</span></div>
+        <div class="bar" role="img" aria-label="VRAM 89 percent used"><b style="width:89%"></b></div>
+        <div class="row2" style="margin-top:12px"><span>Power</span><span class="mono">417 / 450 W</span></div>
+        <div class="bar pw" role="img" aria-label="Power 93 percent of limit"><b style="width:93%"></b></div>
+        <div class="mets">
+          <div class="met"><b>98<i>%</i></b><span>Utilization</span></div>
+          <div class="met"><b class="warm">78<i>°C</i></b><span>Hotspot 91 · Mem 98</span></div>
+          <div class="met"><b>2520<i>MHz</i></b><span>Core clock</span></div>
+          <div class="met"><b>71<i>%</i></b><span>Fan</span></div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <span class="chip warn">Throttle: power cap</span>
+          <span class="chip">PCIe 4.0 x16 · 13.1 GB/s</span>
+          <span class="chip">ECC off</span>
+        </div>
+      </section>
+      <section class="card">
+        <div class="ch"><span class="lbl">GPU 1</span><span class="chip">RTX 4090 · 24 GB</span></div>
+        <div class="row2"><span>VRAM</span><span class="mono">19.8 / 24 GB</span></div>
+        <div class="bar" role="img" aria-label="VRAM 83 percent used"><b style="width:83%"></b></div>
+        <div class="row2" style="margin-top:12px"><span>Power</span><span class="mono">388 / 450 W</span></div>
+        <div class="bar pw" role="img" aria-label="Power 86 percent of limit"><b style="width:86%"></b></div>
+        <div class="mets">
+          <div class="met"><b>96<i>%</i></b><span>Utilization</span></div>
+          <div class="met"><b>74<i>°C</i></b><span>Hotspot 86 · Mem 92</span></div>
+          <div class="met"><b>2640<i>MHz</i></b><span>Core clock</span></div>
+          <div class="met"><b>64<i>%</i></b><span>Fan</span></div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <span class="chip good">Throttle: none</span>
+          <span class="chip">PCIe 4.0 x8 · 7.4 GB/s</span>
+          <span class="chip">ECC off</span>
+        </div>
+      </section>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+      <section class="card" style="flex:3 1 560px">
+        <div class="ch" style="margin-bottom:4px"><span class="lbl">Tokens/s vs GPU 0 · last 30 min</span>
+          <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;color:#8B93A0">
+            <span><span style="display:inline-block;width:18px;height:0;border-top:2px solid #E8EAED;vertical-align:middle;margin-right:6px"></span>Tokens/s (Ollama)</span>
+            <span><span style="display:inline-block;width:18px;height:0;border-top:2px solid #F5A524;vertical-align:middle;margin-right:6px"></span>GPU temp</span>
+            <span><span style="display:inline-block;width:18px;height:0;border-top:2px dashed #4CC9F0;vertical-align:middle;margin-right:6px"></span>Core clock</span>
+          </div>
+        </div>
+        <svg viewBox="0 0 760 250" style="width:100%;height:auto;display:block" role="img" aria-label="Chart: tokens per second drops from about 42 to about 31 at the same time the GPU hits a thermal and power throttle at 14:32, while core clock falls from 2.5 to 2.2 gigahertz and temperature stays near 80 degrees.">
+          <g stroke="#272E38" stroke-width="1"><line x1="50" y1="20" x2="740" y2="20"></line><line x1="50" y1="70" x2="740" y2="70"></line><line x1="50" y1="120" x2="740" y2="120"></line><line x1="50" y1="170" x2="740" y2="170"></line><line x1="50" y1="220" x2="740" y2="220"></line></g>
+          <g font-size="11" fill="#8B93A0" font-family="IBM Plex Mono, monospace"><text x="14" y="24">100</text><text x="20" y="74">75</text><text x="20" y="124">50</text><text x="20" y="174">25</text><text x="26" y="224">0</text><text x="50" y="240">14:00</text><text x="250" y="240">14:10</text><text x="450" y="240">14:20</text><text x="650" y="240">14:30</text></g>
+          <rect x="560" y="20" width="150" height="200" fill="#F5A524" fill-opacity="0.10"></rect>
+          <text x="566" y="36" font-size="11" fill="#F5A524" font-family="IBM Plex Mono, monospace">14:28 power cap + thermal</text>
+          <polyline points="50,106 100,104 150,108 200,104 250,106 300,102 350,106 400,104 450,108 500,104 550,106 570,128 610,134 650,130 690,132 730,130" fill="none" stroke="#E8EAED" stroke-width="2.2"></polyline>
+          <polyline points="50,100 100,92 150,80 200,72 250,70 300,66 350,64 400,62 450,62 500,60 550,60 600,58 650,58 700,60 730,60" fill="none" stroke="#F5A524" stroke-width="2.2"></polyline>
+          <polyline points="50,78 100,76 150,80 200,78 250,80 300,78 350,80 400,78 450,80 500,78 550,80 570,110 610,114 650,112 690,114 730,112" fill="none" stroke="#4CC9F0" stroke-width="2.2" stroke-dasharray="6 5"></polyline>
+        </svg>
+        <div class="sub" style="margin-top:6px">Surtr correlates application metrics with sensors: throughput fell 26% when GPU 0 started power-capping.</div>
+      </section>
+
+      <section class="card" style="flex:2 1 380px">
+        <div class="ch"><span class="lbl">Processes using GPUs</span><span class="chip">4 processes</span></div>
+        <table>
+          <thead><tr><th>Process</th><th>GPU</th><th class="r">VRAM</th><th class="r">Util</th></tr></thead>
+          <tbody class="mono">
+            <tr><td>ollama serve</td><td>0</td><td class="r">14.2 GB</td><td class="r">71%</td></tr>
+            <tr><td>python train.py</td><td>1</td><td class="r">19.8 GB</td><td class="r">96%</td></tr>
+            <tr><td>ComfyUI</td><td>0</td><td class="r">7.2 GB</td><td class="r">27%</td></tr>
+            <tr><td>Xorg</td><td>0</td><td class="r">0.3 GB</td><td class="r">1%</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+      <section class="card" style="flex:3 1 560px">
+        <div class="ch" style="margin-bottom:2px"><span class="lbl">Alerts and events</span><a href="#" style="font-size:12.5px;color:var(--ac)">Configure alerts</a></div>
+        <div class="al"><span class="tag w">Warn</span><div><div>GPU 0 hit its power cap for 6 min (14:28 to 14:34). Hotspot reached 91 °C.</div><div class="sub">Suggestion: lower the power limit to 400 W or raise fan curve above 70 °C.</div></div></div>
+        <div class="al"><span class="tag i">Info</span><div><div>Model loaded: llama-3.1-70b-q4 (adapter: Ollama)</div><div class="sub">14:02 · GPU 0 and GPU 1</div></div></div>
+        <div class="al"><span class="tag i">Info</span><div><div>Training run started: python train.py (adapter: log file)</div><div class="sub">13:41 · GPU 1</div></div></div>
+      </section>
+      <section class="card" style="flex:2 1 380px">
+        <div class="ch"><span class="lbl">Energy and adapters</span></div>
+        <div class="mets" style="margin-top:0">
+          <div class="met"><b>18.4<i>kWh</i></b><span>Today</span></div>
+          <div class="met"><b>$2.76</b><span>At $0.15/kWh</span></div>
+          <div class="met"><b>142<i>W</i></b><span>Idle draw</span></div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <span class="chip good">Ollama · connected</span>
+          <span class="chip good">Log file · watching</span>
+          <span class="chip">vLLM · not found</span>
+          <span class="chip">ComfyUI · off</span>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#F5A524","options":["#F5A524","#4CC9F0","#B6F23A","#FF6B5E"]},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const nav = [
+      { label: 'Overview', href: 'Main.dc.html', d: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z' },
+      { label: 'CPU', href: 'Cpu.dc.html', d: 'M7 7h10v10H7z M10 10h4v4h-4z M9 3v4 M15 3v4 M9 17v4 M15 17v4 M3 9h4 M3 15h4 M17 9h4 M17 15h4' },
+      { label: 'GPU', href: '#', d: 'M2 7h20v10H2z M15 12a3 3 0 1 0-6 0a3 3 0 0 0 6 0z M6 17v3 M18 17v3' },
+      { label: 'Memory', href: '#', d: 'M3 8h18v8H3z M7 8v4 M11 8v4 M15 8v4 M19 8v4 M6 16v2 M10 16v2 M14 16v2 M18 16v2' },
+      { label: 'Storage', href: '#', d: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3z M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
+      { label: 'Sensors', href: '#', d: 'M3 12h4l3-7 4 14 3-7h4' },
+      { label: 'Workstation', href: 'Workstation.dc.html', d: 'M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01', sep: true, on: true },
+      { label: 'Game Session', href: 'Game.dc.html', d: 'M6 9h12a4 4 0 0 1 4 4v1a3 3 0 0 1-5 2l-1-1H8l-1 1a3 3 0 0 1-5-2v-1a4 4 0 0 1 4-4z M8 11v4 M6 13h4 M16 12h.01 M18 14h.01' },
+      { label: 'Stress Test', href: 'Stress.dc.html', d: 'M13 2L4 14h7l-1 8 9-12h-7z', sep: true },
+      { label: 'Tuning', href: 'Tuning.dc.html', d: 'M4 7h10 M18 7h2 M4 17h2 M10 17h10 M16 5v4 M8 15v4' },
+      { label: 'Benchmarks', href: '#', d: 'M5 20V10 M12 20V4 M19 20v-7' },
+      { label: 'Reports', href: 'Report.dc.html', d: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h7', sep: true },
+      { label: 'Connections', href: 'Connections.dc.html', d: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1' }
+    ].map(n => ({ ...n, cls: (n.on ? 'on' : '') + (n.sep ? ' sep' : '') }));
+    return { nav, accent: this.props.accent ?? '#F5A524' };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Terminal UI</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0C0E12}
+.term{width:1100px;height:720px;box-sizing:border-box;background:#0C0E12;color:#D4D9E0;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:14px;line-height:1.5;padding:18px 24px;overflow:hidden;border:1px solid #272E38}
+.term pre{margin:0;font:inherit;white-space:pre}
+.dim{color:#8B93A0}
+.am{color:#F5A524}
+.gr{color:#3DD6A6}
+.cy{color:#4CC9F0}
+.rd{color:#FF6B5E}
+.hl{background:#1B2028;color:#E8EAED}
+.bold{font-weight:500;color:#E8EAED}
+</style>
+</helmet>
+<div class="term" role="img" aria-label="Terminal user interface of surtr showing two GPUs with utilization, VRAM and power bars, a throttle warning on GPU 0, a process list and a short event list.">
+<pre><span class="hl"> surtr tui </span>  <span class="dim">host</span> ai-box  <span class="dim">·</span>  2 GPUs  <span class="dim">·</span>  Linux 6.8  <span class="dim">·</span>  poll 1s          <span class="dim">[q]uit [tab] view [s]ort [?] help</span>
+
+<span class="bold">GPU 0</span>  RTX 4090          <span class="am">78°C</span>  <span class="dim">hot</span> 91  <span class="dim">mem</span> 98   <span class="dim">fan</span> 71%   <span class="dim">PCIe 4.0 x16</span>  13.1 GB/s
+  Util  <span class="cy">██████████████████████████████░</span>  98%      Clock 2520 MHz
+  VRAM  <span class="cy">███████████████████████████░░░░</span>  21.4 / 24.0 GB
+  Power <span class="am">██████████████████████████░░░░░</span>  417 / 450 W   <span class="am">▲ THROTTLE: power cap</span>
+  Hist  <span class="dim">util</span> <span class="cy">▅▆▇▇██████▇███████████████▇████</span>   <span class="dim">temp</span> <span class="am">▃▃▄▄▅▅▅▆▆▆▆▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇</span>
+
+<span class="bold">GPU 1</span>  RTX 4090          <span class="gr">74°C</span>  <span class="dim">hot</span> 86  <span class="dim">mem</span> 92   <span class="dim">fan</span> 64%   <span class="dim">PCIe 4.0 x8</span>   7.4 GB/s
+  Util  <span class="cy">█████████████████████████████░░</span>  96%      Clock 2640 MHz
+  VRAM  <span class="cy">████████████████████████░░░░░░░</span>  19.8 / 24.0 GB
+  Power <span class="am">███████████████████████░░░░░░░░</span>  388 / 450 W   <span class="gr">throttle: none</span>
+  Hist  <span class="dim">util</span> <span class="cy">▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇</span>   <span class="dim">temp</span> <span class="gr">▄▄▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅</span>
+
+<span class="bold">CPU</span>   Ryzen 9 7950X     <span class="gr">61°C</span>  <span class="dim">load</span> 22%  <span class="dim">clock</span> 4.9 GHz  <span class="dim">power</span> 96 W     <span class="bold">RAM</span> 74 / 128 GB
+
+<span class="hl"> PID      USER    GPU  VRAM      UTIL  COMMAND                          </span>
+ <span class="dim">23117</span>    zc      1    19.8 GB   96%   python train.py --config big.yaml
+ <span class="dim">4410</span>     ollama  0    14.2 GB   71%   ollama serve
+ <span class="dim">9082</span>     zc      0     7.2 GB   27%   python main.py (ComfyUI)
+ <span class="dim">1203</span>     root    0     0.3 GB    1%   /usr/lib/xorg/Xorg
+
+<span class="am">14:34</span> <span class="am">WARN</span> GPU 0 power cap for 6 min, hotspot 91°C        <span class="dim">14:02</span> model loaded llama-3.1-70b-q4 (ollama)</pre>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":720}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CPU Detail</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0E1013}
+a{color:inherit;text-decoration:none}
+.app{--bg:#0E1013;--s1:#151920;--s2:#1B2028;--line:#272E38;--tx:#E8EAED;--mu:#8B93A0;--ac:#F5A524;--ok:#3DD6A6;--hot:#FF6B5E;--cool:#4CC9F0;display:flex;flex-wrap:wrap;align-items:stretch;min-height:900px;background:var(--bg);color:var(--tx);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;line-height:1.4}
+.side{flex:0 0 232px;box-sizing:border-box;background:#0A0C0F;border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:6px}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-weight:600;letter-spacing:.14em;font-size:15px}
+.mark{width:22px;height:22px;border-radius:5px;background:var(--ac)}
+.nav{display:flex;align-items:center;gap:12px;padding:0 12px;min-height:44px;box-sizing:border-box;border-radius:6px;color:var(--mu)}
+.nav:hover{background:var(--s1);color:var(--tx)}
+.nav.on{background:var(--s2);color:var(--tx);box-shadow:inset 3px 0 0 var(--ac)}
+.nav svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.nav.sep{margin-top:18px}
+.sidefoot{margin-top:auto;padding:12px;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--mu)}
+.main{flex:999 1 560px;min-width:0;box-sizing:border-box;padding:24px 28px;display:flex;flex-direction:column;gap:20px}
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:22px;font-weight:600}
+.sub{color:var(--mu);font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;box-sizing:border-box;padding:0 18px;border-radius:6px;border:1px solid var(--line);background:var(--s2);color:var(--tx);font:inherit;font-weight:500;cursor:pointer}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#1A1200}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.lbl{font-size:11.5px;color:var(--mu);letter-spacing:.08em;text-transform:uppercase}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;border:1px solid var(--line);font-size:12px;color:var(--mu)}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line)}
+.tab{padding:0 16px;min-height:44px;display:flex;align-items:center;color:var(--mu);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--tx);border-bottom-color:var(--ac)}
+.spec{display:grid;grid-template-columns:130px minmax(0,1fr);gap:0;margin:12px 0 0}
+.spec dt,.spec dd{margin:0;padding:9px 0;border-top:1px solid var(--line)}
+.spec dt{color:var(--mu)}
+.spec dd{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px}
+.core{background:var(--s2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.core .hd{display:flex;justify-content:space-between;font-size:12px;color:var(--mu)}
+.core .fq{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:20px;font-weight:500;margin:4px 0 2px}
+.core .fq i{font-style:normal;font-size:12px;color:var(--mu);margin-left:3px}
+.core .row{display:flex;justify-content:space-between;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;color:var(--mu)}
+.bar{height:5px;border-radius:3px;background:#272E38;margin-top:8px;overflow:hidden}
+.bar b{display:block;height:100%;background:var(--ac)}
+.warm{color:var(--ac)}
+.best{color:var(--ok)}
+.lim{display:grid;grid-template-columns:110px minmax(0,1fr) 120px;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+.lim .track{height:8px;border-radius:4px;background:#272E38;overflow:hidden}
+.lim .track b{display:block;height:100%;background:var(--ac)}
+</style>
+</helmet>
+<div class="app" style="--ac: {{accent}}">
+  <aside class="side">
+    <div class="brand"><span class="mark"></span>HWX</div>
+    <sc-for list="{{nav}}" as="item" hint-placeholder-count="9">
+      <a class="nav {{item.cls}}" href="{{item.href}}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{item.d}}"></path></svg>
+        {{item.label}}
+      </a>
+    </sc-for>
+    <div class="sidefoot"><b style="color:#E8EAED;font-weight:500">Privileged sensors off</b><br>PawnIO not installed. Core voltages and SPD timings are unavailable.</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div>
+        <h1>CPU</h1>
+        <div class="sub">AMD Ryzen 9 7950X · sample data</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+        <a class="btn" href="#">Export Report</a>
+        <a class="btn pri" href="Stress.dc.html">Stress This CPU</a>
+      </div>
+    </div>
+
+    <nav class="tabs" aria-label="CPU sections">
+      <a class="tab on" href="#">Summary</a>
+      <a class="tab" href="#">Cores</a>
+      <a class="tab" href="#">Cache</a>
+      <a class="tab" href="#">Instructions</a>
+      <a class="tab" href="#">Voltages</a>
+    </nav>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+      <div style="flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:16px">
+        <section class="card">
+          <span class="lbl">Processor</span>
+          <dl class="spec">
+            <dt>Name</dt><dd>AMD Ryzen 9 7950X</dd>
+            <dt>Codename</dt><dd>Raphael (Zen 4)</dd>
+            <dt>Package</dt><dd>Socket AM5 (LGA1718)</dd>
+            <dt>Technology</dt><dd>5 nm · 2 CCD + 1 IOD</dd>
+            <dt>Cores / Threads</dt><dd>16 / 32</dd>
+            <dt>Base / Max boost</dt><dd>4.5 GHz / 5.7 GHz</dd>
+            <dt>TDP</dt><dd>170 W</dd>
+            <dt>Microcode</dt><dd>0xA601203</dd>
+          </dl>
+        </section>
+        <section class="card">
+          <span class="lbl">Cache</span>
+          <dl class="spec">
+            <dt>L1 data</dt><dd>16 × 32 KB, 8-way</dd>
+            <dt>L1 instr.</dt><dd>16 × 32 KB, 8-way</dd>
+            <dt>L2</dt><dd>16 × 1 MB, 8-way</dd>
+            <dt>L3</dt><dd>2 × 32 MB, 16-way</dd>
+          </dl>
+        </section>
+      </div>
+
+      <div style="flex:2 1 520px;min-width:0;display:flex;flex-direction:column;gap:16px">
+        <section class="card">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px">
+            <span class="lbl">Cores · live</span>
+            <span class="sub">Rank = firmware preferred-core order (1 = best silicon)</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:10px">
+            <sc-for list="{{cores}}" as="c" hint-placeholder-count="16">
+              <div class="core">
+                <div class="hd"><span>Core {{c.id}}</span><span class="{{c.rankCls}}">Rank {{c.rank}}</span></div>
+                <div class="fq">{{c.freq}}<i>GHz</i></div>
+                <div class="row"><span class="{{c.tempCls}}">{{c.temp}} °C</span><span>{{c.volt}} V</span></div>
+                <div class="bar" role="img" aria-label="Load {{c.load}} percent"><b style="width:{{c.loadW}}"></b></div>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+
+        <section class="card">
+          <span class="lbl">Power &amp; limits</span>
+          <div style="margin-top:8px">
+            <div class="lim"><span>PPT</span><div class="track"><b style="width:62%"></b></div><span class="mono" style="text-align:right">142 / 230 W</span></div>
+            <div class="lim"><span>TDC</span><div class="track"><b style="width:71%"></b></div><span class="mono" style="text-align:right">85 / 120 A</span></div>
+            <div class="lim"><span>EDC</span><div class="track"><b style="width:68%"></b></div><span class="mono" style="text-align:right">136 / 200 A</span></div>
+            <div class="lim"><span>Tctl</span><div class="track"><b style="width:67%"></b></div><span class="mono" style="text-align:right">64 / 95 °C</span></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#F5A524","options":["#F5A524","#4CC9F0","#B6F23A","#FF6B5E"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const nav = [
+      { label: 'Overview', href: 'Main.dc.html', d: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z' },
+      { label: 'CPU', href: 'Cpu.dc.html', d: 'M7 7h10v10H7z M10 10h4v4h-4z M9 3v4 M15 3v4 M9 17v4 M15 17v4 M3 9h4 M3 15h4 M17 9h4 M17 15h4', on: true },
+      { label: 'GPU', href: '#', d: 'M2 7h20v10H2z M15 12a3 3 0 1 0-6 0a3 3 0 0 0 6 0z M6 17v3 M18 17v3' },
+      { label: 'Memory', href: '#', d: 'M3 8h18v8H3z M7 8v4 M11 8v4 M15 8v4 M19 8v4 M6 16v2 M10 16v2 M14 16v2 M18 16v2' },
+      { label: 'Storage', href: '#', d: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3z M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
+      { label: 'Sensors', href: '#', d: 'M3 12h4l3-7 4 14 3-7h4' },
+      { label: 'Stress Test', href: 'Stress.dc.html', d: 'M13 2L4 14h7l-1 8 9-12h-7z', sep: true },
+      { label: 'Tuning', href: 'Tuning.dc.html', d: 'M4 7h10 M18 7h2 M4 17h2 M10 17h10 M16 5v4 M8 15v4' },
+      { label: 'Benchmarks', href: '#', d: 'M5 20V10 M12 20V4 M19 20v-7' }
+    ].map(n => ({ ...n, cls: (n.on ? 'on' : '') + (n.sep ? ' sep' : '') }));
+
+    const freq = [5.45, 5.38, 5.21, 5.12, 5.05, 5.40, 5.32, 5.18, 4.98, 5.02, 4.95, 5.10, 5.15, 4.90, 5.20, 5.25];
+    const temp = [62, 64, 59, 61, 66, 60, 63, 58, 67, 65, 64, 61, 60, 66, 62, 59];
+    const load = [92, 88, 95, 100, 76, 90, 84, 98, 100, 82, 94, 100, 86, 91, 78, 97];
+    const rank = [1, 2, 6, 9, 12, 3, 4, 8, 15, 14, 16, 11, 10, 13, 7, 5];
+    const volt = [1.312, 1.298, 1.287, 1.281, 1.276, 1.305, 1.301, 1.284, 1.262, 1.270, 1.258, 1.279, 1.283, 1.255, 1.289, 1.292];
+    const cores = freq.map((f, i) => ({
+      id: i,
+      freq: f.toFixed(2),
+      temp: temp[i],
+      tempCls: temp[i] >= 66 ? 'warm' : '',
+      load: load[i],
+      loadW: load[i] + '%',
+      rank: rank[i],
+      rankCls: rank[i] <= 2 ? 'best' : '',
+      volt: volt[i].toFixed(3)
+    }));
+    return { nav, cores, accent: this.props.accent ?? '#F5A524' };
+  }
+}
+</script>
+</body>
+</html>

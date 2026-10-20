@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Connections</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0E1013}
+a{color:inherit;text-decoration:none}
+.app{--bg:#0E1013;--s1:#151920;--s2:#1B2028;--line:#272E38;--tx:#E8EAED;--mu:#8B93A0;--ac:#F5A524;--ok:#3DD6A6;--hot:#FF6B5E;--cool:#4CC9F0;display:flex;flex-wrap:wrap;align-items:stretch;min-height:1100px;background:var(--bg);color:var(--tx);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;line-height:1.4}
+.side{flex:0 0 232px;box-sizing:border-box;background:#0A0C0F;border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:4px}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 14px;font-weight:600;letter-spacing:.14em;font-size:15px}
+.mark{width:22px;height:22px;border-radius:5px;background:var(--ac)}
+.nav{display:flex;align-items:center;gap:12px;padding:0 12px;min-height:44px;box-sizing:border-box;border-radius:6px;color:var(--mu)}
+.nav:hover{background:var(--s1);color:var(--tx)}
+.nav.on{background:var(--s2);color:var(--tx);box-shadow:inset 3px 0 0 var(--ac)}
+.nav svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.nav.sep{margin-top:14px}
+.sidefoot{margin-top:auto;padding:12px;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--mu)}
+.main{flex:999 1 560px;min-width:0;box-sizing:border-box;padding:24px 28px;display:flex;flex-direction:column;gap:20px}
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:22px;font-weight:600}
+.sub{color:var(--mu);font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;box-sizing:border-box;padding:0 18px;border-radius:6px;border:1px solid var(--line);background:var(--s2);color:var(--tx);font:inherit;font-weight:500;cursor:pointer}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#1A1200}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.lbl{font-size:11.5px;color:var(--mu);letter-spacing:.08em;text-transform:uppercase}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;border:1px solid var(--line);font-size:12px;color:var(--mu)}
+.chip.good{border-color:var(--ok);color:var(--ok)}
+.chip.warn{border-color:var(--ac);color:var(--ac)}
+.hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.ttl{font-size:16px;font-weight:600}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.row .d{color:var(--mu);font-size:13px}
+.sw{position:relative;width:46px;height:26px;flex:none}
+.sw input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.sw span{position:absolute;inset:0;border-radius:99px;background:#2A313B;border:1px solid var(--line)}
+.sw span::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#8B93A0}
+.sw input:checked + span{background:var(--ac);border-color:var(--ac)}
+.sw input:checked + span::after{left:23px;background:#1A1200}
+.sw input:focus-visible + span{outline:2px solid var(--cool);outline-offset:2px}
+select,input.t{min-height:44px;box-sizing:border-box;background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:6px;padding:0 10px;font:inherit}
+input.t{width:150px}
+.code{background:#0A0C0F;border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;line-height:1.55;overflow-x:auto;white-space:pre;color:#C9D1DB}
+.code .k{color:#4CC9F0}.code .r{color:#8B93A0}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:500;color:var(--mu);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;padding:6px 10px 8px 0}
+td{padding:9px 10px 9px 0;border-top:1px solid var(--line)}
+.ok{color:var(--ok)}.bad{color:var(--hot)}
+.warnbox{display:flex;gap:12px;padding:12px 14px;border:1px solid var(--ac);border-radius:8px;background:#1F1A0E;font-size:13px}
+</style>
+</helmet>
+<div class="app" style="--ac: {{accent}}">
+  <aside class="side">
+    <div class="brand"><span class="mark"></span>SURTR</div>
+    <sc-for list="{{nav}}" as="item" hint-placeholder-count="13">
+      <a class="nav {{item.cls}}" href="{{item.href}}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{item.d}}"></path></svg>
+        {{item.label}}
+      </a>
+    </sc-for>
+    <div class="sidefoot"><b style="color:#E8EAED;font-weight:500">Local only</b><br>Nothing leaves this machine unless you turn an option on here.</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div>
+        <h1>Connections</h1>
+        <div class="sub">API, MCP server, exporters and AI assistant · all off or read-only by default · sample data</div>
+      </div>
+      <a class="btn" href="#">Open Audit Log</a>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+      <div style="flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:16px">
+        <section class="card">
+          <div class="hd"><span class="ttl">Local API</span><label class="sw"><input type="checkbox" aria-label="Local API"><span></span></label></div>
+          <div class="sub">REST and WebSocket on this machine only. Required by the MCP server over HTTP.</div>
+          <div class="row"><span>Address</span><span class="mono">127.0.0.1:7720</span></div>
+          <div class="row"><span>Access token</span><span style="display:flex;align-items:center;gap:8px"><span class="mono">••••••••••••3f9a</span><a class="btn" href="#">Reveal</a><a class="btn" href="#">Regenerate</a></span></div>
+        </section>
+
+        <section class="card">
+          <div class="hd"><span class="ttl">MCP server</span><label class="sw"><input type="checkbox" checked aria-label="MCP server"><span></span></label></div>
+          <div class="sub">Lets AI assistants read this machine's hardware state. Each client gets only the scopes you grant.</div>
+          <div class="row"><span>Transport</span><select aria-label="Transport"><option>stdio (client launches Surtr)</option><option>Local HTTP</option></select></div>
+          <div class="lbl" style="margin:14px 0 2px">Permission scopes</div>
+          <div class="row"><div><div>Read</div><div class="d">System info, sensors, history, runs</div></div><label class="sw"><input type="checkbox" checked aria-label="Read scope"><span></span></label></div>
+          <div class="row"><div><div>Run tests</div><div class="d">Start and stop stress tests within host limits</div></div><label class="sw"><input type="checkbox" aria-label="Run scope"><span></span></label></div>
+          <div class="row"><div><div>Tune</div><div class="d">Preview profiles. Applying always needs your confirmation here.</div></div><label class="sw"><input type="checkbox" aria-label="Tune scope"><span></span></label></div>
+          <div class="warnbox" style="margin-top:12px"><span class="mono" style="color:#F5A524">!</span><span>Safety limits (temperature, power) are enforced by Surtr for every request. An AI client cannot raise them or approve its own changes.</span></div>
+        </section>
+
+        <section class="card">
+          <div class="hd"><span class="ttl">Exporters</span></div>
+          <div class="row" style="border-top:0"><div><div>Prometheus</div><div class="d mono">:9101/metrics · Grafana, Alloy, Prometheus</div></div><label class="sw"><input type="checkbox" checked aria-label="Prometheus"><span></span></label></div>
+          <div class="row"><div><div>OpenTelemetry (OTLP)</div><div class="d">Push metrics to a collector</div></div><label class="sw"><input type="checkbox" aria-label="OTLP"><span></span></label></div>
+          <div class="row"><div><div>InfluxDB line protocol</div><div class="d">Push to Influx or Telegraf</div></div><label class="sw"><input type="checkbox" aria-label="InfluxDB"><span></span></label></div>
+          <div class="row"><div><div>Webhook on test failure</div><div class="d">Discord, Slack or a custom URL</div></div><label class="sw"><input type="checkbox" aria-label="Webhook"><span></span></label></div>
+        </section>
+      </div>
+
+      <div style="flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:16px">
+        <section class="card">
+          <div class="hd"><span class="ttl">AI assistant</span><span class="chip">Off</span></div>
+          <div class="sub">Summaries and instability triage from your run records. Off by default.</div>
+          <div class="row"><span>Backend</span><select aria-label="AI backend"><option>Off</option><option>Local model (Ollama)</option><option>Bring your own API key</option></select></div>
+          <div class="row"><span>Include hostnames and serial numbers</span><label class="sw"><input type="checkbox" aria-label="Include identifiers"><span></span></label></div>
+          <div class="lbl" style="margin:14px 0 8px">Preview of data that would be sent</div>
+          <div class="code" role="region" aria-label="Preview of redacted data"><span class="r">// redacted run record (excerpt)</span>
+{
+  <span class="k">"verdict"</span>: "fail",
+  <span class="k">"workload"</span>: "cpu-fft / large",
+  <span class="k">"error"</span>: { <span class="k">"core"</span>: 7, <span class="k">"at_s"</span>: 432 },
+  <span class="k">"core7"</span>: { <span class="k">"clock_mhz"</span>: 5180, <span class="k">"vcore_v"</span>: 1.284, <span class="k">"offset"</span>: -30 },
+  <span class="k">"hostname"</span>: "<span class="r">[redacted]</span>",
+  <span class="k">"serials"</span>: "<span class="r">[redacted]</span>"
+}</div>
+          <div style="margin-top:12px;display:flex;gap:10px"><a class="btn" href="#">Copy Preview</a><a class="btn pri" href="#">Save</a></div>
+        </section>
+
+        <section class="card">
+          <div class="hd"><span class="ttl">Connected clients</span><span class="chip good">1 active</span></div>
+          <table>
+            <thead><tr><th>Client</th><th>Scopes</th><th>Last seen</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>Claude Desktop (stdio)</td><td class="mono">read</td><td>2 min ago</td><td><a href="#" style="color:var(--ac)">Revoke</a></td></tr>
+              <tr><td>Home Assistant</td><td class="mono">read</td><td>Oct 12</td><td><a href="#" style="color:var(--ac)">Revoke</a></td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="card">
+          <div class="hd"><span class="ttl">Audit log</span><a href="#" style="font-size:12.5px;color:var(--ac)">Export</a></div>
+          <table>
+            <thead><tr><th>Time</th><th>Client</th><th>Action</th><th>Result</th></tr></thead>
+            <tbody class="mono">
+              <tr><td>14:36</td><td>Claude Desktop</td><td>get_throttle_reasons</td><td class="ok">ok</td></tr>
+              <tr><td>14:35</td><td>Claude Desktop</td><td>get_sensors</td><td class="ok">ok</td></tr>
+              <tr><td>14:35</td><td>Claude Desktop</td><td>start_stress_test</td><td class="bad">denied (scope)</td></tr>
+              <tr><td>12:08</td><td>Home Assistant</td><td>get_system_info</td><td class="ok">ok</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#F5A524","options":["#F5A524","#4CC9F0","#B6F23A","#FF6B5E"]},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const nav = [
+      { label: 'Overview', href: 'Main.dc.html', d: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z' },
+      { label: 'CPU', href: 'Cpu.dc.html', d: 'M7 7h10v10H7z M10 10h4v4h-4z M9 3v4 M15 3v4 M9 17v4 M15 17v4 M3 9h4 M3 15h4 M17 9h4 M17 15h4' },
+      { label: 'GPU', href: '#', d: 'M2 7h20v10H2z M15 12a3 3 0 1 0-6 0a3 3 0 0 0 6 0z M6 17v3 M18 17v3' },
+      { label: 'Memory', href: '#', d: 'M3 8h18v8H3z M7 8v4 M11 8v4 M15 8v4 M19 8v4 M6 16v2 M10 16v2 M14 16v2 M18 16v2' },
+      { label: 'Storage', href: '#', d: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3z M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
+      { label: 'Sensors', href: '#', d: 'M3 12h4l3-7 4 14 3-7h4' },
+      { label: 'Workstation', href: 'Workstation.dc.html', d: 'M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01', sep: true },
+      { label: 'Game Session', href: 'Game.dc.html', d: 'M6 9h12a4 4 0 0 1 4 4v1a3 3 0 0 1-5 2l-1-1H8l-1 1a3 3 0 0 1-5-2v-1a4 4 0 0 1 4-4z M8 11v4 M6 13h4 M16 12h.01 M18 14h.01' },
+      { label: 'Stress Test', href: 'Stress.dc.html', d: 'M13 2L4 14h7l-1 8 9-12h-7z', sep: true },
+      { label: 'Tuning', href: 'Tuning.dc.html', d: 'M4 7h10 M18 7h2 M4 17h2 M10 17h10 M16 5v4 M8 15v4' },
+      { label: 'Benchmarks', href: '#', d: 'M5 20V10 M12 20V4 M19 20v-7' },
+      { label: 'Reports', href: 'Report.dc.html', d: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h7', sep: true },
+      { label: 'Connections', href: 'Connections.dc.html', d: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1', on: true }
+    ].map(n => ({ ...n, cls: (n.on ? 'on' : '') + (n.sep ? ' sep' : '') }));
+    return { nav, accent: this.props.accent ?? '#F5A524' };
+  }
+}
+</script>
+</body>
+</html>

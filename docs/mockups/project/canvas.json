@@ -1,0 +1,33 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-10-18T12:00:00Z" },
+  "title": "Surtr Mockups",
+  "launch": { "view": "canvas" },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": { "x": 0, "y": 0, "w": 1440, "h": 900, "title": "Overview", "expand": "fill", "is_interactive": true },
+    "Cpu.dc.html": { "x": 1520, "y": 0, "w": 1440, "h": 900, "title": "CPU Detail", "expand": "fill", "is_interactive": true },
+    "Stress.dc.html": { "x": 0, "y": 1020, "w": 1440, "h": 900, "title": "Stress Test", "expand": "fill", "is_interactive": true },
+    "Tuning.dc.html": { "x": 1520, "y": 1020, "w": 1440, "h": 900, "title": "Tuning", "expand": "fill", "is_interactive": true },
+    "Workstation.dc.html": { "x": 0, "y": 2040, "w": 1440, "h": 1000, "title": "AI Workstation", "expand": "fill", "is_interactive": true },
+    "Game.dc.html": { "x": 1520, "y": 2040, "w": 1440, "h": 1000, "title": "Game Session", "expand": "fill", "is_interactive": true },
+    "Simple.dc.html": { "x": 0, "y": 3160, "w": 1440, "h": 900, "title": "Simple Mode", "expand": "fill", "is_interactive": true },
+    "Report.dc.html": { "x": 1520, "y": 3160, "w": 1440, "h": 1100, "title": "Run Report", "expand": "fill", "is_interactive": true },
+    "Connections.dc.html": { "x": 0, "y": 4380, "w": 1440, "h": 1100, "title": "Connections: API, MCP, AI", "expand": "fill", "is_interactive": true },
+    "Tui.dc.html": { "x": 1520, "y": 4380, "w": 1100, "h": 720, "title": "Terminal UI" }
+  },
+  "order": [
+    "Main.dc.html",
+    "Cpu.dc.html",
+    "Stress.dc.html",
+    "Tuning.dc.html",
+    "Workstation.dc.html",
+    "Game.dc.html",
+    "Simple.dc.html",
+    "Report.dc.html",
+    "Connections.dc.html",
+    "Tui.dc.html"
+  ],
+  "notes": {},
+  "designSystems": []
+}

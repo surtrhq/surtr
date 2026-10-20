@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stress Test</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0E1013}
+a{color:inherit;text-decoration:none}
+.app{--bg:#0E1013;--s1:#151920;--s2:#1B2028;--line:#272E38;--tx:#E8EAED;--mu:#8B93A0;--ac:#F5A524;--ok:#3DD6A6;--hot:#FF6B5E;--cool:#4CC9F0;display:flex;flex-wrap:wrap;align-items:stretch;min-height:900px;background:var(--bg);color:var(--tx);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;line-height:1.4}
+.side{flex:0 0 232px;box-sizing:border-box;background:#0A0C0F;border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:6px}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-weight:600;letter-spacing:.14em;font-size:15px}
+.mark{width:22px;height:22px;border-radius:5px;background:var(--ac)}
+.nav{display:flex;align-items:center;gap:12px;padding:0 12px;min-height:44px;box-sizing:border-box;border-radius:6px;color:var(--mu)}
+.nav:hover{background:var(--s1);color:var(--tx)}
+.nav.on{background:var(--s2);color:var(--tx);box-shadow:inset 3px 0 0 var(--ac)}
+.nav svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.nav.sep{margin-top:18px}
+.sidefoot{margin-top:auto;padding:12px;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--mu)}
+.main{flex:999 1 560px;min-width:0;box-sizing:border-box;padding:24px 28px;display:flex;flex-direction:column;gap:20px}
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:22px;font-weight:600}
+.sub{color:var(--mu);font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;box-sizing:border-box;padding:0 18px;border-radius:6px;border:1px solid var(--line);background:var(--s2);color:var(--tx);font:inherit;font-weight:500;cursor:pointer}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#1A1200}
+.btn.stop{border-color:var(--hot);color:var(--hot);background:transparent}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.lbl{font-size:11.5px;color:var(--mu);letter-spacing:.08em;text-transform:uppercase}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;border:1px solid var(--line);font-size:12px;color:var(--mu)}
+.chip.live{border-color:var(--ok);color:var(--ok)}
+.plug{border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--s2);display:flex;flex-direction:column;gap:10px}
+.plug.off{opacity:.75}
+.plug label.t{display:flex;align-items:center;gap:10px;font-weight:500;min-height:28px}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--ac);margin:0}
+.fld{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.fld span{color:var(--mu);font-size:13px}
+select,input.n{min-height:44px;box-sizing:border-box;background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:6px;padding:0 10px;font:inherit}
+input.n{width:96px;text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.stat b{display:block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:26px;font-weight:500;line-height:1.15}
+.stat b i{font-style:normal;font-size:13px;color:var(--mu);margin-left:3px}
+.stat span{font-size:12px;color:var(--mu)}
+.bar{height:6px;border-radius:3px;background:#272E38;margin-top:10px;overflow:hidden}
+.bar b{display:block;height:100%;background:var(--ac)}
+.w{border:1px solid var(--line);border-radius:6px;background:var(--s2);padding:8px 10px;display:flex;justify-content:space-between;align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px}
+.w.err{border-color:var(--hot);background:#2A1717}
+.w .ok{color:var(--ok)}
+.w .bad{color:var(--hot);font-weight:500}
+.log{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;display:flex;flex-direction:column}
+.log div{padding:7px 0;border-top:1px solid var(--line);display:flex;gap:14px}
+.log .tm{color:var(--mu);flex:none}
+.log .e{color:var(--hot)}
+.log .wn{color:var(--ac)}
+</style>
+</helmet>
+<div class="app" style="--ac: {{accent}}">
+  <aside class="side">
+    <div class="brand"><span class="mark"></span>HWX</div>
+    <sc-for list="{{nav}}" as="item" hint-placeholder-count="9">
+      <a class="nav {{item.cls}}" href="{{item.href}}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{item.d}}"></path></svg>
+        {{item.label}}
+      </a>
+    </sc-for>
+    <div class="sidefoot"><b style="color:#E8EAED;font-weight:500">Privileged sensors off</b><br>PawnIO not installed. Core voltages and SPD timings are unavailable.</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div>
+        <h1>Stress Test</h1>
+        <div class="sub">Verified workloads run as isolated plugins · sample data</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+        <span class="chip live">Running</span>
+        <a class="btn" href="#">Save Report</a>
+        <a class="btn stop" href="#">Stop Run</a>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+      <div style="flex:0 1 340px;min-width:0;display:flex;flex-direction:column;gap:16px">
+        <section class="card" style="display:flex;flex-direction:column;gap:10px">
+          <span class="lbl">Workloads</span>
+          <div class="plug">
+            <div class="fld"><label class="t"><input type="checkbox" checked> CPU · Verified FFT</label><span class="chip">built-in</span></div>
+            <div class="fld"><span>Mode</span><select aria-label="CPU mode"><option>Large FFT (AVX2)</option><option>Small FFT</option><option>AVX-512</option><option>Mixed integer</option></select></div>
+          </div>
+          <div class="plug">
+            <div class="fld"><label class="t"><input type="checkbox" checked> Memory · Pattern</label><span class="chip">built-in</span></div>
+            <div class="fld"><span>Size</span><select aria-label="Memory size"><option>75% of free RAM</option><option>50% of free RAM</option><option>90% of free RAM</option></select></div>
+          </div>
+          <div class="plug off">
+            <div class="fld"><label class="t"><input type="checkbox"> GPU · Compute</label><span class="chip">built-in</span></div>
+            <div class="fld"><span>Adapter</span><select aria-label="GPU adapter"><option>RTX 4080 SUPER</option></select></div>
+          </div>
+          <div class="plug off">
+            <div class="fld"><label class="t"><input type="checkbox"> Storage · Verify</label><span class="chip">third-party</span></div>
+            <div class="fld"><span>Target</span><select aria-label="Storage target"><option>Scratch file, 8 GB</option></select></div>
+          </div>
+        </section>
+
+        <section class="card" style="display:flex;flex-direction:column;gap:10px">
+          <span class="lbl">Safety limits · host enforced</span>
+          <div class="fld"><label for="lcpu" style="color:#8B93A0">Abort above CPU temp</label><span><input class="n" id="lcpu" value="95"> °C</span></div>
+          <div class="fld"><label for="lgpu" style="color:#8B93A0">Abort above GPU temp</label><span><input class="n" id="lgpu" value="88"> °C</span></div>
+          <div class="fld"><label for="lpw" style="color:#8B93A0">Abort above total power</label><span><input class="n" id="lpw" value="450"> W</span></div>
+          <div class="fld"><label class="t" style="display:flex;align-items:center;gap:10px"><input type="checkbox"> Stop on first error</label></div>
+          <div class="fld"><label class="t" style="display:flex;align-items:center;gap:10px"><input type="checkbox" checked> One worker per core</label></div>
+        </section>
+      </div>
+
+      <div style="flex:2 1 520px;min-width:0;display:flex;flex-direction:column;gap:16px">
+        <section class="card">
+          <div style="display:flex;flex-wrap:wrap;gap:12px 36px">
+            <div class="stat"><b>12:41<i>/ 60:00</i></b><span>Elapsed</span></div>
+            <div class="stat"><b style="color:#FF6B5E">1<i>error</i></b><span>Core 7 at 07:12</span></div>
+            <div class="stat"><b style="color:#F5A524">91<i>°C</i></b><span>Peak CPU temp</span></div>
+            <div class="stat"><b>5.09<i>GHz</i></b><span>Avg clock</span></div>
+            <div class="stat"><b>228<i>W</i></b><span>Package power</span></div>
+          </div>
+          <div class="bar" role="img" aria-label="Run progress 21 percent"><b style="width:21%"></b></div>
+        </section>
+
+        <section class="card">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+            <span class="lbl">Live telemetry</span>
+            <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;color:#8B93A0">
+              <span><span style="display:inline-block;width:18px;height:0;border-top:2px solid #F5A524;vertical-align:middle;margin-right:6px"></span>CPU temp</span>
+              <span><span style="display:inline-block;width:18px;height:0;border-top:2px solid #4CC9F0;vertical-align:middle;margin-right:6px"></span>Clock</span>
+              <span><span style="display:inline-block;width:18px;height:0;border-top:2px dashed #E8EAED;vertical-align:middle;margin-right:6px"></span>Power</span>
+              <span><span style="display:inline-block;width:18px;height:0;border-top:2px dashed #FF6B5E;vertical-align:middle;margin-right:6px"></span>Limit</span>
+            </div>
+          </div>
+          <svg viewBox="0 0 760 250" style="width:100%;height:auto;display:block" role="img" aria-label="Telemetry during the stress run: temperature climbs to about 90 degrees and stays below the 95 degree limit, clock settles near 5.1 gigahertz, power plateaus near 228 watts. A vertical marker shows a verification error on core 7 at 7 minutes 12 seconds.">
+            <g stroke="#272E38" stroke-width="1"><line x1="50" y1="20" x2="740" y2="20"></line><line x1="50" y1="70" x2="740" y2="70"></line><line x1="50" y1="120" x2="740" y2="120"></line><line x1="50" y1="170" x2="740" y2="170"></line><line x1="50" y1="220" x2="740" y2="220"></line></g>
+            <g font-size="11" fill="#8B93A0" font-family="IBM Plex Mono, monospace"><text x="14" y="24">100</text><text x="20" y="74">75</text><text x="20" y="124">50</text><text x="20" y="174">25</text><text x="26" y="224">0</text><text x="50" y="240">0:00</text><text x="220" y="240">4:00</text><text x="390" y="240">8:00</text><text x="560" y="240">12:00</text></g>
+            <line x1="50" y1="30" x2="740" y2="30" stroke="#FF6B5E" stroke-width="1.5" stroke-dasharray="7 5"></line>
+            <text x="640" y="24" font-size="11" fill="#FF6B5E" font-family="IBM Plex Mono, monospace">limit 95 °C</text>
+            <line x1="345" y1="20" x2="345" y2="220" stroke="#FF6B5E" stroke-width="1.5"></line>
+            <text x="352" y="48" font-size="11" fill="#FF6B5E" font-family="IBM Plex Mono, monospace">07:12 · core 7</text>
+            <polyline points="50,130 100,80 150,56 200,48 250,44 300,40 350,42 400,38 450,40 500,38 550,42 600,40 650,38 700,40" fill="none" stroke="#F5A524" stroke-width="2.2"></polyline>
+            <polyline points="50,75 100,90 150,100 200,105 250,108 300,110 350,110 400,112 450,110 500,113 550,111 600,112 650,112 700,111" fill="none" stroke="#4CC9F0" stroke-width="2.2"></polyline>
+            <polyline points="50,140 100,87 150,74 200,70 250,69 300,68 350,69 400,67 450,69 500,68 550,69 600,69 650,67 700,68" fill="none" stroke="#E8EAED" stroke-width="2" stroke-dasharray="6 5"></polyline>
+          </svg>
+        </section>
+
+        <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+          <section class="card" style="flex:1 1 360px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span class="lbl">Workers · one per core</span><span class="sub">15 OK · 1 error</span></div>
+            <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:8px">
+              <sc-for list="{{workers}}" as="w" hint-placeholder-count="16">
+                <div class="w {{w.cls}}"><span>C{{w.id}}</span><span class="{{w.tc}}">{{w.state}}</span></div>
+              </sc-for>
+            </div>
+          </section>
+          <section class="card" style="flex:1 1 360px">
+            <div style="margin-bottom:6px"><span class="lbl">Event log</span></div>
+            <div class="log">
+              <div><span class="tm">12:41</span><span>Peak temp 91 °C, limit 95 °C</span></div>
+              <div><span class="tm">07:12</span><span class="e">Core 7 verification mismatch (Large FFT). Worker continues.</span></div>
+              <div><span class="tm">07:11</span><span class="wn">Core 7 at 5.18 GHz, Vcore 1.284 V</span></div>
+              <div><span class="tm">00:00</span><span>Run started · profile Daily · plugin cpu-fft 0.1.0</span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#F5A524","options":["#F5A524","#4CC9F0","#B6F23A","#FF6B5E"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const nav = [
+      { label: 'Overview', href: 'Main.dc.html', d: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z' },
+      { label: 'CPU', href: 'Cpu.dc.html', d: 'M7 7h10v10H7z M10 10h4v4h-4z M9 3v4 M15 3v4 M9 17v4 M15 17v4 M3 9h4 M3 15h4 M17 9h4 M17 15h4' },
+      { label: 'GPU', href: '#', d: 'M2 7h20v10H2z M15 12a3 3 0 1 0-6 0a3 3 0 0 0 6 0z M6 17v3 M18 17v3' },
+      { label: 'Memory', href: '#', d: 'M3 8h18v8H3z M7 8v4 M11 8v4 M15 8v4 M19 8v4 M6 16v2 M10 16v2 M14 16v2 M18 16v2' },
+      { label: 'Storage', href: '#', d: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3z M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
+      { label: 'Sensors', href: '#', d: 'M3 12h4l3-7 4 14 3-7h4' },
+      { label: 'Stress Test', href: 'Stress.dc.html', d: 'M13 2L4 14h7l-1 8 9-12h-7z', sep: true, on: true },
+      { label: 'Tuning', href: 'Tuning.dc.html', d: 'M4 7h10 M18 7h2 M4 17h2 M10 17h10 M16 5v4 M8 15v4' },
+      { label: 'Benchmarks', href: '#', d: 'M5 20V10 M12 20V4 M19 20v-7' }
+    ].map(n => ({ ...n, cls: (n.on ? 'on' : '') + (n.sep ? ' sep' : '') }));
+    const workers = Array.from({ length: 16 }, (_, i) => i === 7
+      ? { id: i, cls: 'err', state: 'ERR', tc: 'bad' }
+      : { id: i, cls: '', state: 'OK', tc: 'ok' });
+    return { nav, workers, accent: this.props.accent ?? '#F5A524' };
+  }
+}
+</script>
+</body>
+</html>
