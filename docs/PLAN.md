@@ -1,6 +1,6 @@
 # Surtr: rough plan
 
-Status: draft v0.1. Everything here is a plan, not a commitment. Items marked
+Status: draft v0.2. Everything here is a plan, not a commitment. Items marked
 **(verify)** rely on third-party APIs or crates whose current state has not
 been checked.
 
@@ -26,6 +26,9 @@ toolbox, and it is scriptable and AI-connectable from day one.
   read state and run tests, with write access gated by explicit consent.
 - **Run everywhere:** Windows, Linux and macOS on x86-64 and ARM64; Intel,
   AMD and ARM CPUs; NVIDIA, AMD, Intel and Apple GPUs.
+- **Stay modular and extensible:** a small core with replaceable parts
+  (backends, workloads, exporters, data packs) and a plugin system so the
+  community can add hardware support and tests without forking (section 4.1).
 
 ### Non-goals (for now)
 - Competing with Cinebench/Geekbench scores or running a public leaderboard.
@@ -44,6 +47,9 @@ toolbox, and it is scriptable and AI-connectable from day one.
 5. **Local-first, private by default.** No telemetry. No data leaves the
    machine unless the user configures an exporter or an AI endpoint.
 6. **Tuning is separate from inspection** in code, UI and permissions.
+7. **Modular by design.** Every vendor-, OS- or feature-specific part sits
+   behind a trait or a versioned protocol, so it can be built, disabled,
+   replaced or contributed independently of the core.
 
 ## 2. Audience and differentiators
 
@@ -101,6 +107,7 @@ surtr/
     surtr-store/        SQLite history, retention, run records
     surtr-core/         polling loop, event bus, safety limits, plugin host
     surtr-plugin-api/   plugin manifest + event schema (serde, no I/O)
+    surtr-plugin-sdk/   helper crate for writing plugins in Rust (manifest, events, params)
     surtr-service/      privileged helper (Windows service / Linux daemon / launchd)
     surtr-api/          local HTTP + WebSocket API, OpenAPI schema
     surtr-mcp/          MCP server (stdio + local streamable HTTP)
@@ -160,6 +167,93 @@ never raw MSR or physical-memory access, and checks the caller.
   and an **auto-revert timer** (default 60 s) unless confirmed.
 - Hard floors/ceilings per platform that no caller can override.
 - Audit log of every write and every test start, with the caller identity.
+
+### 4.1 Modularity and plugin system
+
+Surtr is a small core with replaceable parts. The aim is that a contributor
+can add support for a new sensor chip, a new stress workload or a new export
+target by writing one self-contained module, without touching the core and
+without being able to weaken its safety rules.
+
+**Three layers of extension, from most to least trusted:**
+
+1. **Compile-time modules (Cargo features).** Backends, exporters, GUI,
+   MCP, AI and the heavy stress dependencies (wgpu etc.) are separate crates
+   behind features. This gives slim builds (for example a CLI-only
+   Linux build with `--no-default-features`), easier distro packaging, and a
+   smaller audit surface for privileged code.
+2. **Runtime plugins (out-of-process).** A plugin is an executable that
+   speaks a versioned JSON-lines protocol over stdio. Any language works.
+   It can be killed, resource-limited and permission-limited by the host.
+   This is the main community extension mechanism.
+3. **Sandboxed script plugins (WASM, optional, later).** Pure-computation
+   modules with no hardware or file access: derived sensors, alert rules,
+   report templates, export formatting. Candidate runtime: `wasmtime` with
+   the component model **(verify maturity)**.
+
+In-process native plugin loading (`.dll` / `.so` via `dlopen`) is **out of
+scope**: Rust has no stable ABI, a crashing plugin would take the host down,
+and it would sit inside the privileged trust boundary. Crates like
+`abi_stable` were considered and rejected for now.
+
+**Extension points:**
+
+| Extension point | Mechanism | Examples |
+|---|---|---|
+| Hardware backend (`Provider`) | Built-in crate, or read-only out-of-process provider plugin | New vendor sensors, board-specific embedded-controller support, community Super I/O chip maps |
+| Stress / benchmark workload | Out-of-process plugin | Wrappers for external tools, custom verified kernels, game-like loads |
+| Exporter / sink | Built-in, or plugin | Prometheus, OTLP, InfluxDB, MQTT, webhooks, Home Assistant |
+| Derived sensors and alert rules | Declarative config, later WASM | "VRM delta", effective clock, rate-of-change alerts |
+| Report templates | Data templates, later WASM | HTML layouts, forum-post summary |
+| SKU and board data packs | Data files (TOML/JSON), versioned | CPU/GPU SKUs, per-board sensor labels and fan mappings |
+| GUI panels | Declarative panel schema (title, metrics, chart type), not arbitrary UI code | Custom dashboards |
+| MCP tools | Plugins may declare extra tools; the same scopes and limits apply | A board-specific VRM status tool |
+| AI backends | Trait implementations or endpoint configuration | Local models, hosted providers |
+
+**Plugin contract:**
+- **Manifest** (`plugin.toml`, and returned by `plugin --describe`): id, name,
+  version, kind, supported platforms/architectures, required capabilities,
+  declared parameters and sensors, supported plugin API range, license,
+  homepage.
+- **Versioned protocol:** semantic versioning with a handshake that negotiates
+  the version. Unknown fields are ignored. Changes within a major version are
+  additive only. The API is experimental (v0) until the first stress release,
+  then v1 with a documented compatibility policy.
+- **Capabilities and permissions:** a plugin declares what it needs (read
+  sensors, generate load, write files, use the network, needs admin). The
+  user grants it; the host enforces it. Default is deny. Plugins never get
+  raw privileged access, only the named operations the privileged service
+  already offers.
+- **Isolation:** separate process, timeouts, output-size caps, memory/CPU
+  limits where the OS allows (job objects on Windows, cgroups/rlimits on
+  Linux; macOS limits are weaker, so plugins there are more trusted-by-user).
+- **Tuning plugins are second-class:** plugins that can write hardware
+  settings are disabled by default, need explicit user trust, and still go
+  through the same safety limits, confirmation and auto-revert path as
+  built-in tuning. A plugin cannot raise its own limits.
+- **Install and trust:** plugins live in a per-user directory
+  (`surtr plugin list | install | enable | disable | remove`). Installs verify
+  a checksum and, where available, a signature (minisign/sigstore style).
+  Unsigned plugins show a clear warning. No automatic updates at first. A
+  curated index (a git repo of manifests) is a later option; a full "store"
+  is a non-goal.
+- **SDK and tooling:** a `surtr-plugin-sdk` Rust crate, a published JSON
+  Schema for the manifest and events, example plugins in Rust and Python, and
+  `surtr plugin test`, which runs a plugin against a mock host with simulated
+  limits and failures.
+- **Performance boundary:** high-frequency or latency-sensitive sensor reads
+  stay in built-in backends. Provider plugins are polled at a coarse interval.
+
+**Core design rules that keep it modular:**
+- Dependency direction: `surtr-model` is used by backend traits, which are used
+  by `surtr-core`, which is used by API, MCP, GUI and CLI. Nothing depends on
+  the GUI, and backends do not depend on each other.
+- Platform `cfg` lives only in backend crates, never in core logic.
+- Every module reports what it can and cannot do (`get_capabilities`), so the
+  GUI, API and MCP adapt instead of assuming.
+- Every heavy dependency is behind a feature flag.
+- Every crate has a mock or fixture-based test and a documented, semver-ed
+  public API.
 
 ## 5. Feature areas
 
@@ -312,11 +406,12 @@ Decide before first public release:
 | M3 | GUI v1 | egui Overview, CPU, Sensors screens on all three OS |
 | M4 | Export | Prometheus `/metrics`, CSV/JSON export, first Grafana dashboard |
 | M5 | Local API + MCP (read-only) | `surtr-mcp` with `read` tools, auth, audit log; example agent session documented |
-| M6 | Stress v1 | Plugin protocol, host limits, verified CPU plugin, run records + HTML report; MCP `run` scope |
+| M6 | Stress v1 | Plugin protocol v0 documented, host limits, verified CPU plugin built on it, run records + HTML report; MCP `run` scope |
 | M7 | Stress v2 + SKU DB | Memory, storage, GPU plugins; SKU database and contribution workflow |
 | M8 | Privileged backends | Service split, PawnIO (Windows) and root helpers (Linux), SMBus/SPD, AMD/Intel power |
 | M9 | Tuning (opt-in) | Profiles, auto-revert, apply-and-stress, stability map; MCP `tune` scope with human confirmation |
 | M10 | AI features + OTLP/Influx | Local-LLM summaries and triage, OpenTelemetry/Influx export, fleet dashboard |
+| M11 | Plugin ecosystem | Plugin API v1 with compatibility policy, `surtr plugin` install/trust commands, SDK + examples + `surtr plugin test`, provider and exporter plugins, optional WASM script plugins, curated manifest index |
 
 M0 to M6 is the first public-worthy milestone: a cross-platform inspector and
 monitor with verified CPU stress testing, Grafana export, and an MCP server.
@@ -335,7 +430,18 @@ monitor with verified CPU stress testing, Grafana export, and an MCP server.
   audit log, writes off by default.
 - **Hardware access for testing** across Intel, AMD, ARM, Apple. Need a plan
   for test machines or community testers.
-- Open questions: minimum OS versions; native Rust GPU stress approach
+- **Plugin trust and safety:** a third-party plugin can generate heavy load or
+  (if allowed) change hardware settings. Mitigation: out-of-process, default
+  deny, capability grants, host-enforced limits, signatures and warnings,
+  tuning plugins off by default.
+- **Plugin API churn:** freezing the protocol too early locks in mistakes,
+  too late discourages contributors. Mitigation: experimental v0 through the
+  first stress release, first-party plugins on the same protocol, then v1.
+- **Modularity overhead:** many crates and feature combinations raise build
+  and CI cost. Mitigation: test a small set of supported feature profiles
+  (full, slim CLI, no-AI) instead of every combination.
+- Open questions: minimum OS versions; whether WASM script plugins are worth
+  their complexity compared with declarative rules; native Rust GPU stress approach
   (wgpu vs vendor APIs); whether to build a Windows service or a scheduled
   elevated helper first; whether to support remote/fleet agents in v1.
 
