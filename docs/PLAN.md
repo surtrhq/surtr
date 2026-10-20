@@ -1,14 +1,17 @@
 # Surtr: rough plan
 
-Status: draft v0.2. Everything here is a plan, not a commitment. Items marked
+Status: draft v0.3. Everything here is a plan, not a commitment. Items marked
 **(verify)** rely on third-party APIs or crates whose current state has not
 been checked.
 
 Surtr (Old Norse fire giant, said roughly "SOOR-tur") is an open source,
 cross-platform hardware inspection, monitoring, stress-testing and tuning
-tool for enthusiasts and gamers who overclock. It is written in Rust. One
-tool replaces the CPU-Z + GPU-Z + HWiNFO + stress/benchmark + tuning-utility
-toolbox, and it is scriptable and AI-connectable from day one.
+tool for **gamers, overclocking enthusiasts, AI workstation owners and
+everyday users who just want to know their PC is healthy**. It is written in
+Rust. One tool replaces the LibreHardwareMonitor + CPU-Z + GPU-Z + HWiNFO +
+MSI Afterburner + RivaTuner Statistics Server + CPU/GPU stress-tool toolbox,
+adds the GPU-fleet and workload awareness that AI workstations need, and is
+scriptable and AI-connectable from day one.
 
 ## 1. Goals and non-goals
 
@@ -33,6 +36,11 @@ toolbox, and it is scriptable and AI-connectable from day one.
 ### Non-goals (for now)
 - Competing with Cinebench/Geekbench scores or running a public leaderboard.
 - BIOS flashing, firmware updates, RGB lighting control.
+- A frame-rate limiter or an injected in-game overlay in early releases
+  (see section 5.8 for the staged approach).
+- Replacing datacenter fleet tooling (DCGM, Kubernetes GPU operators). Surtr
+  targets workstations and small multi-GPU boxes, and interoperates with
+  those stacks through Prometheus/OTLP.
 - Anything that needs a custom signed kernel driver in the first releases.
 - Fully feature-equal support on every OS. Capability differs by platform and
   the UI must say so honestly (see section 3).
@@ -53,9 +61,22 @@ toolbox, and it is scriptable and AI-connectable from day one.
 
 ## 2. Audience and differentiators
 
-Enthusiasts who overclock or undervolt (Curve Optimizer, power limits, memory
-timings), and gamers who want to prove a setup is stable. Differentiators
-against existing tools:
+Four personas, one tool with a different front door for each (see 2.2):
+
+- **Gamer:** wants an overlay with FPS/frametimes and temperatures, and proof
+  that a setup is stable. Cares about anti-cheat compatibility.
+- **Enthusiast / overclocker:** overclocks or undervolts (Curve Optimizer,
+  power limits, memory timings) and needs deep sensors, verified stress tests
+  and safe tuning.
+- **AI workstation owner:** runs local LLM inference, training, image/video
+  generation or rendering on one or more GPUs. Needs VRAM, power, thermal and
+  throttle visibility per GPU and per process, long-run reliability, alerts,
+  and Grafana/Prometheus integration. Often headless or remote (Linux, WSL2,
+  SSH).
+- **Regular user:** wants a plain-language "is my PC healthy?" summary, with
+  no jargon unless they ask for it.
+
+Differentiators against existing tools:
 
 - Open source and cross-platform (HWiNFO, CPU-Z, GPU-Z, OCCT are closed).
 - Verified stress tests that name the failing core and the clock/voltage at
@@ -63,6 +84,75 @@ against existing tools:
 - A scriptable CLI/API and an MCP server (none of the incumbents has these).
 - First-class export to Grafana/Prometheus for long-running tests and homelabs.
 - Per-core stability map that ties tuning offsets to stress results.
+- **AI-workstation awareness:** per-GPU and per-process VRAM, throttle
+  reasons, PCIe/NVLink state, and correlation of application metrics (for
+  example tokens per second) with hardware sensors on one timeline. Existing
+  enthusiast tools don't understand AI workloads, and existing GPU-ops tools
+  (nvidia-smi, nvtop, DCGM) aren't aimed at workstation users.
+- Free, open equivalents of features that are limited or paid elsewhere
+  (command-line logging and reports, unlimited sensor feeds, remote
+  monitoring of several machines).
+
+## 2.1 Landscape: what Surtr consolidates
+
+Research notes (details and confidence in Appendix A):
+
+| Tool | What it does | License / platform | What Surtr takes | What Surtr avoids |
+|---|---|---|---|---|
+| LibreHardwareMonitor | Sensor library (NuGet) plus WinForms GUI: temps, fans, voltages, loads, clocks for Intel/AMD CPUs, NVIDIA/AMD/Intel GPUs, boards, storage, NICs | MPL-2.0, C#, Windows | Sensor-coverage knowledge, library-first design. MPL allows file-level reuse if reused files stay MPL | Windows-only; some sensors need admin and vary by board |
+| HWiNFO64 | Deepest sensor and system info, logging, reports, remote monitoring, shared-memory feed for overlays | Closed. Free for non-commercial; Pro adds command-line reports/logging, unlimited shared memory (free is capped at 12 h) and more remote hosts (5 free, 50 Pro) | The bar for sensor depth. Logging, reports and feeds as free, open features | Closed source, feature gating |
+| CPU-Z | CPU, board, memory/SPD identification, small benchmark, short stress test | Closed freeware, Windows | Identification views, validation-style export | Its benchmark/stress test isn't a real stability test |
+| GPU-Z | GPU details, sensors with performance-limit (throttle reason) indicators, render test, BIOS backup | Closed freeware, Windows | Throttle-reason indicators (key for AI rigs too) | BIOS dump/flash out of early scope |
+| MSI Afterburner | GPU tuning: clocks, voltage, power/temp limits, V/F curve editor, OC Scanner (~30 min), fan curves, profiles; bundles RTSS for the overlay | Closed freeware, Windows | Tuning UX: curve editor, fan curves, profiles, scanner concept paired with real verification | Windows-only; scanning without verified error detection |
+| RivaTuner Statistics Server | On-screen display, frametime graph, frame limiter, per-app profiles by hooking DirectX/OpenGL/Vulkan | Free, closed, Windows | Frametime view and OSD concept | Injection hooks conflict with some anti-cheat systems; deferred (5.8) |
+| CPU stress tools (Prime95, OCCT, y-cruncher, Linpack variants, stress-ng) | Heavy verified compute loads | Mixed; most closed or single-purpose | Verified computation, per-core error attribution | Heat-only loads that don't detect errors |
+| GPU stress tools (FurMark, OCCT GPU, gpu-burn) | Graphics and compute burn. gpu-burn: multi-GPU CUDA, memory %, FP64, Tensor cores | gpu-burn BSD-2 (NVIDIA/CUDA only); others closed | Multi-GPU compute loads, Tensor-core loads for AI cards | CUDA-only lock-in |
+| nvtop | Terminal GPU monitor, many vendors (AMD, Intel, NVIDIA, limited Apple, others), per-process VRAM, PCIe RX/TX | GPL-3.0, Linux | TUI model and per-process view as a feature target | Copying code (GPL); clean-room only |
+| MangoHud | Vulkan layer / OpenGL overlay with FPS, frametime, VRAM, power, logging | MIT, Linux | Linux overlay approach, interoperate or export config | Reimplementing it first |
+| DCGM + dcgm-exporter | NVIDIA datacenter GPU health; Prometheus metrics on port 9400 including XID, health status and P2P/NVLink status | NVIDIA, datacenter-oriented | Metric concepts and naming for the AI dashboards, compatibility with existing Prometheus setups | Datacenter-only assumptions; consumer-GPU coverage is unverified |
+
+Observations (our assessment, not verified claims):
+1. No single tool covers inspect, monitor, stress, tune and overlay. Users
+   juggle four to six tools, mostly Windows-only and mostly closed.
+2. The open-source options are fragmented by OS and vendor.
+3. AI workstation owners mostly use `nvidia-smi`, nvtop or DCGM with Grafana,
+   not enthusiast tools, and none of those tie hardware stress, tuning and
+   application metrics together.
+4. Consumer stress GUIs rarely include AI-relevant loads (Tensor cores, FP16/
+   BF16, sustained VRAM pressure); gpu-burn does, but only as a CLI.
+5. Licensing shapes reuse: MPL-2.0 (LibreHardwareMonitor) allows file-level
+   reuse, MIT/BSD (MangoHud, gpu-burn) is easy, GPL-3.0 (nvtop) must not be
+   copied into Apache/MIT crates.
+
+### Consolidation map
+
+| Capability | Replaces | Surtr module | Milestone |
+|---|---|---|---|
+| Hardware identification | CPU-Z, GPU-Z, HWiNFO | `surtr-backend` + `surtr-db` | M1, M7 |
+| Live sensors and throttle reasons | LibreHardwareMonitor, HWiNFO, GPU-Z, nvtop | `surtr-backend`, GUI/TUI | M2, M3 |
+| Per-process GPU usage and VRAM | nvtop, `nvidia-smi` | GPU backends, GUI/TUI | M2 |
+| Logging, reports, remote feed | HWiNFO (Pro features) | `surtr-store`, `surtr-export`, `surtr-api` | M4 |
+| Dashboards (Grafana) | dcgm-exporter + custom setups | `surtr-export`, `dashboards/` | M4 |
+| CPU/memory/GPU/storage stress | Prime95, OCCT, FurMark, gpu-burn | stress plugins | M6, M7 |
+| OC controls, curve editor, fan curves | MSI Afterburner | tuning module | M9 |
+| Overlay and frametimes | RTSS, MangoHud | overlay module (staged) | M12 |
+| Automation and AI agents | none of the above | `surtr-api`, `surtr-mcp` | M5 |
+
+## 2.2 Experience modes (one engine, four front doors)
+
+- **Simple mode (regular user):** a health summary with traffic lights and
+  plain-language messages ("GPU is running hot; check case airflow"), no
+  jargon, no tuning controls.
+- **Gaming mode:** overlay presets, frametime view, session summary after a
+  game, stability check before a long session.
+- **Advanced mode (enthusiast):** full sensor tree, per-core views, stress and
+  tuning screens.
+- **Workstation mode (AI):** per-GPU dashboard, per-process VRAM, throttle
+  reasons, headless daemon plus a terminal UI, alerts, Grafana dashboards,
+  application-metric adapters (5.7).
+
+All four use the same model, backends and safety rules; modes only change what
+is shown and enabled.
 
 ## 3. Platform and hardware support
 
@@ -87,6 +177,13 @@ Notes:
 - **Vendor differences:** Intel (RAPL, MSR), AMD (Zen SMU, CPPC, Curve
   Optimizer), ARM server parts (vendor sysfs, SCMI) each get their own
   backend module behind the same traits.
+
+**AI workstation GPU stack.** NVIDIA through NVML (also under WSL2 and
+Docker), AMD through the amdgpu sysfs interface and ROCm/AMD SMI, Intel
+through the i915/xe drivers and Level Zero **(verify current interfaces and
+which consumer-card metrics each exposes)**. Linux headless is first class for
+this audience: daemon, terminal UI, Prometheus endpoint, no display required.
+Apple Silicon gets unified-memory and power basics only.
 
 Minimum supported versions to decide at M0: Windows 10/11, a recent Linux
 kernel (for `hwmon`/amdgpu), macOS 13+.
@@ -113,6 +210,8 @@ surtr/
     surtr-mcp/          MCP server (stdio + local streamable HTTP)
     surtr-export/       Prometheus, OpenTelemetry, InfluxDB, CSV/JSON/Parquet, HTML reports
     surtr-cli/          `surtr` command, JSON output
+    surtr-tui/          terminal UI for headless and SSH use (nvtop-style, multi-GPU)
+    surtr-overlay/      overlay module (external window first; staged, see 5.8)
     surtr-gui/          egui app (consumes surtr-model only)
   plugins/
     stress-cpu/  stress-mem/  stress-gpu/  stress-storage/   built-in plugins (separate binaries)
@@ -303,6 +402,70 @@ map per core. Linux and Windows first; macOS read-only.
 token-protected). It is the single backend that the GUI, CLI and MCP server
 can share, so permissions and safety are enforced in one place.
 
+### 5.7 AI workstation monitoring
+
+Goal: an AI workstation owner can answer "is my machine healthy and fast
+while the model runs, and if not, why?" without stitching tools together.
+
+- **Multi-GPU dashboard:** per GPU: VRAM used/total, utilization, core and
+  memory clocks, power draw versus limit, temperatures (core, hotspot, memory
+  junction where available), fan speed, PCIe link generation/width and
+  throughput, NVLink/peer status where present, ECC counters on cards that
+  have them.
+- **Throttle reasons:** why a GPU is below its potential clock (power,
+  thermal, voltage, board limits), shown live and recorded in history. This
+  is the single most useful signal for "why did my tokens/s drop?"
+- **Per-process view:** which process holds how much VRAM and uses how much
+  GPU (nvtop-style), with container and WSL2 awareness and friendly names for
+  common AI runtimes.
+- **Workload adapters (plugins):** scrape or receive application metrics
+  (inference servers that expose Prometheus metrics, training-loop logs,
+  custom scripts via a tiny HTTP/stdin push API) and show them on the same
+  timeline as sensors. Example: tokens/s falling at the moment of a thermal
+  throttle. First adapters to evaluate **(verify which exporters exist and
+  their metric names)**: vLLM, llama.cpp server, Ollama, ComfyUI.
+- **Reliability tooling:** long soak runs with Tensor-core/FP16/BF16 and
+  sustained-VRAM loads, a VRAM integrity test (pattern checks for GPU memory),
+  PCIe error and driver-error visibility (Linux kernel log, Windows events),
+  alerts on throttling, temperature, power-cap hits and driver resets.
+- **Efficiency and power management:** persistent power-limit and clock
+  profiles per GPU (common practice on AI rigs), energy use per run and per
+  day, an optional electricity-cost estimate, idle-power view. Writes follow
+  the normal tuning safety model (5.4, section 4 safety).
+- **Headless and remote:** a daemon with systemd/launchd/Windows service
+  units, `surtr tui` for SSH sessions, and a simple multi-host view through
+  Prometheus/Grafana (a "workstation fleet" dashboard) for people with more
+  than one box.
+- **Dashboards:** ship Grafana JSON for "AI workstation overview",
+  "per-GPU detail", and "run timeline" with annotations for model
+  load/unload and test runs.
+- **Beyond GPUs (later):** NPUs and other accelerators through provider
+  plugins; CPU-side signals that matter for AI (memory bandwidth, NUMA,
+  swap, dataset-storage throughput).
+
+### 5.8 Overlay and frametimes (staged)
+
+The RTSS/MangoHud role, built in stages so the risky part comes last:
+
+1. **Frametime capture without injection (Windows).** Use Event Tracing for
+   Windows (ETW) present events, the approach Intel's PresentMon uses
+   **(verify PresentMon's current license and whether to depend on it or
+   reimplement)**. Gives FPS and frametime statistics with no hooks, so no
+   anti-cheat conflict.
+2. **External overlay window.** A transparent, always-on-top, click-through
+   window for borderless/windowed games. No injection. Does not work over
+   exclusive fullscreen; say so in the UI.
+3. **Linux:** interoperate with MangoHud (export a MangoHud config and read
+   its logs) rather than reimplement, then consider our own Vulkan implicit
+   layer later.
+4. **Hook-based overlay and frame limiter (Windows), optional and separate.**
+   DirectX/Vulkan/OpenGL injection is where anti-cheat conflicts and
+   per-API maintenance live. Ship it, if at all, as an opt-in plugin with
+   clear warnings and a list of known-incompatible games.
+5. **Sensor feed for third-party overlays:** a documented shared-memory or
+   local-socket feed (free, no time cap) so existing overlay tools can show
+   Surtr data.
+
 ## 6. MCP and AI connectivity
 
 ### 6.1 MCP server (`surtr-mcp`)
@@ -320,6 +483,9 @@ maturity and spec version)**.
 | `read` | `list_stress_plugins` | available workloads and their parameters |
 | `read` | `get_run`, `list_runs`, `compare_runs` | run records and diffs |
 | `read` | `get_capabilities` | what this machine/OS can and cannot do |
+| `read` | `get_gpu_processes` | per-process VRAM and utilization per GPU |
+| `read` | `get_throttle_reasons` | why each GPU/CPU is below its potential clock, now and over a time range |
+| `read` | `correlate_metrics` | align hardware sensors with application metrics (for example tokens/s) over a range |
 | `run` | `start_stress_test` | start a verified run with parameters and limits |
 | `run` | `stop_stress_test`, `get_run_status` | control and poll |
 | `tune` | `preview_profile` | dry-run: shows what would change |
@@ -402,9 +568,9 @@ Decide before first public release:
 |---|---|---|
 | M0 | Foundations | Workspace, `surtr-model`, `Provider` trait, mock provider, CI matrix on 3 OS, license chosen |
 | M1 | Inspect (driverless) | `surtr --json` prints CPU/memory/OS on Windows + Linux + macOS; ARM64 builds run |
-| M2 | Sensors | GPU (NVML/amdgpu/ADLX), Linux `hwmon`, Windows driverless sensors, SQLite history |
-| M3 | GUI v1 | egui Overview, CPU, Sensors screens on all three OS |
-| M4 | Export | Prometheus `/metrics`, CSV/JSON export, first Grafana dashboard |
+| M2 | Sensors | GPU (NVML/amdgpu/ADLX) including multi-GPU, per-process VRAM and throttle reasons; Linux `hwmon`, Windows driverless sensors, SQLite history |
+| M3 | GUI v1 + TUI | egui Overview, CPU, Sensors screens on all three OS; `surtr tui` multi-GPU view for headless/SSH use |
+| M4 | Export | Prometheus `/metrics`, CSV/JSON export, Grafana dashboards: Overview and AI workstation (per-GPU, throttle reasons); daemon/service units |
 | M5 | Local API + MCP (read-only) | `surtr-mcp` with `read` tools, auth, audit log; example agent session documented |
 | M6 | Stress v1 | Plugin protocol v0 documented, host limits, verified CPU plugin built on it, run records + HTML report; MCP `run` scope |
 | M7 | Stress v2 + SKU DB | Memory, storage, GPU plugins; SKU database and contribution workflow |
@@ -412,6 +578,7 @@ Decide before first public release:
 | M9 | Tuning (opt-in) | Profiles, auto-revert, apply-and-stress, stability map; MCP `tune` scope with human confirmation |
 | M10 | AI features + OTLP/Influx | Local-LLM summaries and triage, OpenTelemetry/Influx export, fleet dashboard |
 | M11 | Plugin ecosystem | Plugin API v1 with compatibility policy, `surtr plugin` install/trust commands, SDK + examples + `surtr plugin test`, provider and exporter plugins, optional WASM script plugins, curated manifest index |
+| M12 | Workload adapters + overlay | Application-metric adapters (inference servers, training logs) correlated with sensors; ETW frametime capture and external overlay window; MangoHud interop on Linux; third-party sensor feed |
 
 M0 to M6 is the first public-worthy milestone: a cross-platform inspector and
 monitor with verified CPU stress testing, Grafana export, and an MCP server.
@@ -440,6 +607,20 @@ monitor with verified CPU stress testing, Grafana export, and an MCP server.
 - **Modularity overhead:** many crates and feature combinations raise build
   and CI cost. Mitigation: test a small set of supported feature profiles
   (full, slim CLI, no-AI) instead of every combination.
+- **Breadth of audience.** Gamers, overclockers, AI users and regular users
+  want different things. Mitigation: one engine with experience modes (2.2),
+  and a clear priority order per milestone rather than building for everyone
+  at once.
+- **Anti-cheat and overlays.** Injected overlays can trigger anti-cheat.
+  Mitigation: no injection until late, ETW capture and external window first,
+  documented compatibility.
+- **Consumer versus datacenter GPU metrics.** Some counters (ECC, NVLink
+  error detail, XID events) are datacenter-oriented. Mitigation: report what
+  each GPU exposes through `get_capabilities` instead of assuming.
+- **GPL contamination.** Reference tools such as nvtop are GPL-3.0. Mitigation:
+  reimplement from public interfaces (NVML, sysfs), never copy code.
+- **AI-metrics adapters depend on third-party exporters** that change often.
+  Mitigation: adapters are plugins with their own versions.
 - Open questions: minimum OS versions; whether WASM script plugins are worth
   their complexity compared with declarative rules; native Rust GPU stress approach
   (wgpu vs vendor APIs); whether to build a Windows service or a scheduled
@@ -452,4 +633,44 @@ monitor with verified CPU stress testing, Grafana export, and an MCP server.
 3. Move the egui prototype into `prototype/` and keep it as a UI reference.
 4. Set up CI on the 3-OS matrix.
 5. Verify the crates and services flagged **(verify)**: `rmcp`, PawnIO
-   terms and module coverage, vendor GPU APIs and their Rust bindings.
+   terms and module coverage, vendor GPU APIs and their Rust bindings,
+   ROCm/AMD SMI and Intel Level Zero coverage, PresentMon licensing, and the
+   exporters of the AI runtimes listed in 5.7.
+
+## Appendix A: landscape research notes and confidence
+
+Gathered 2026-10-20. Several vendor pages blocked automated fetching, so
+some rows rest on secondary sources. Treat this as a starting point.
+
+Read directly from the project's own page:
+- LibreHardwareMonitor (GitHub): MPL-2.0, C#, Windows Forms GUI plus NuGet
+  library, hardware list, admin-required sensors, board-dependent accuracy.
+  It did not state how it reads hardware.
+- nvtop (GitHub): GPL-3.0, vendor list, per-process memory, PCIe RX/TX, Linux.
+- MangoHud (GitHub): MIT, Linux, Vulkan layer and OpenGL hooking, metrics
+  vary by driver/kernel.
+- gpu-burn (GitHub): BSD-2-Clause, CUDA/NVIDIA, multi-GPU, options for memory
+  share, double precision, Tensor cores. The page did not describe how it
+  verifies errors.
+- OCCT (landing page only): described as a free all-in-one stability, stress,
+  benchmark and monitoring tool; test types and licensing terms not confirmed.
+
+From secondary sources (official pages were unreachable):
+- HWiNFO: free for non-commercial use (64-bit and ARM64), Pro adds
+  command-line reports/logging and lifts shared-memory (12 h) and remote
+  (5 vs 50) limits. Some sites misstate the commercial terms; check the
+  vendor's license page before relying on this.
+- CPU-Z: identification, a simple benchmark and stress test (sources disagree
+  on how capable the stress test is). GPU-Z: details, sensors with
+  performance-limit indicators, render test, BIOS backup.
+- MSI Afterburner: clocks, voltage, power/temp limits, curve editor, OC
+  Scanner (about 30 minutes), fan curves, bundled RTSS. AMD support not
+  confirmed.
+- RTSS: free, DirectX/OpenGL/Vulkan, frametime graph, frame limiter,
+  per-app profiles; anti-cheat can restrict it.
+- DCGM/dcgm-exporter: Prometheus on port 9400, XID, health and P2P metrics;
+  exporter scrape interval can miss short events. Consumer-GPU coverage and
+  NVLink error counters were not confirmed.
+
+Not researched: nvitop, y-cruncher, Prime95, FurMark, Unigine and 3DMark
+details, PresentMon, AMD SMI/ROCm and Intel Level Zero specifics.
