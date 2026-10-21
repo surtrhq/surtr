@@ -132,3 +132,60 @@ fn native_gpu_commands_run() {
         .expect("gpu_identity is always reported");
     assert!(gpu["support"]["status"].is_string(), "{caps:#}");
 }
+
+#[test]
+fn record_then_history() {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-history-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("history.db");
+    let db = db.to_str().unwrap();
+
+    // --retain 0: the mock's clock starts at 2026-01-01, which the default
+    // 7-day retention would prune.
+    let v = json(&[
+        "record",
+        "--mock",
+        "--json",
+        "--count",
+        "3",
+        "--retain",
+        "0",
+        "--interval",
+        "0",
+        "--db",
+        db,
+    ]);
+    assert_eq!(v["samples"], 3);
+    assert_eq!(v["values"], 3 * 8);
+
+    let v = json(&["history", "--json", "--db", db]);
+    assert_eq!(v["sensors"].as_array().unwrap().len(), 8);
+
+    // The mock's clock starts at 2026-01-01, so look far enough back.
+    let v = json(&[
+        "history",
+        "cpu0/package/temp",
+        "--since",
+        "1000d",
+        "--json",
+        "--db",
+        db,
+    ]);
+    assert_eq!(v["points"].as_array().unwrap().len(), 3);
+    let v = json(&[
+        "history",
+        "cpu0/package/temp",
+        "--since",
+        "1000d",
+        "--bucket",
+        "1h",
+        "--json",
+        "--db",
+        db,
+    ]);
+    assert_eq!(v["points"][0]["count"], 3);
+
+    let (ok, _) = surtr(&["history", "no/such/sensor", "--db", db]);
+    assert!(!ok);
+    let _ = std::fs::remove_dir_all(&dir);
+}

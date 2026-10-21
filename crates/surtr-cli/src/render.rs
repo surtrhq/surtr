@@ -161,7 +161,7 @@ pub fn caps(provider: &str, capabilities: &Capabilities) -> String {
     out
 }
 
-fn sensor_value(unit: Unit, v: f64) -> String {
+pub fn sensor_value(unit: Unit, v: f64) -> String {
     match unit {
         Unit::Celsius => format!("{v:.1} °C"),
         Unit::Watt => format!("{v:.1} W"),

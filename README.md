@@ -18,7 +18,8 @@ milestones, and [the mockups](docs/mockups/README.md) for the intended UI.
 | [`surtr-backend-nvidia`](crates/surtr-backend-nvidia) | NVIDIA GPUs through NVML, loaded at run time from the driver install (never shipped; see its NOTICE): identity, sensors, throttle reasons, per-process memory. |
 | [`surtr-backend-amd`](crates/surtr-backend-amd) | AMD GPUs on Linux through the `amdgpu` sysfs files: identity (named from `pci.ids`), sensors, per-process memory from DRM `fdinfo`. |
 | [`surtr-core`](crates/surtr-core) | The `Hub`, which combines the OS backend and GPU backends into one view. |
-| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, with `--json` and `--mock`. |
+| [`surtr-store`](crates/surtr-store) | Sensor history in SQLite (compiled in, not shipped separately): retention and bucketed queries. |
+| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, `record`, `history`, with `--json` and `--mock`. |
 
 ## Building
 
