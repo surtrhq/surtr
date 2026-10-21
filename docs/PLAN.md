@@ -723,6 +723,7 @@ maturity and spec version)**.
 | `read` | `list_stress_tests` | available built-in and plugin workloads and their parameters |
 | `read` | `get_run`, `list_runs`, `compare_runs` | run records and diffs |
 | `read` | `get_capabilities` | what this machine/OS can and cannot do |
+| `read` | `get_diagnostics` | the redacted `surtr diag` summary (8.1); never raw dumps |
 | `read` | `get_gpu_processes` | per-process VRAM and utilization per GPU |
 | `read` | `get_throttle_reasons` | why each GPU/CPU is below its potential clock, now and over a time range |
 | `read` | `correlate_metrics` | align hardware sensors with application metrics (for example tokens/s) over a range |
@@ -896,6 +897,21 @@ Enthusiast audiences first.
   (saved `/sys` trees, WMI/SMBIOS dumps). Hardware-in-the-loop on a few real
   machines later (Intel, AMD, ARM Linux, Apple Silicon).
 - **Fuzz** parsers for SMBIOS/DMI and the plugin protocol.
+- **Front-end testing (CLI, TUI, GUI), as much as is practical.** The
+  deterministic mock provider makes every front end testable without
+  hardware. Most screen logic lives in `surtr-view` and is tested there,
+  independent of any toolkit. Candidate approaches per front end, **to be
+  reviewed and agreed when each one starts** (CLI and TUI at M3, GUI at M5b):
+  - CLI: run the binary against the mock provider; snapshot tests of human
+    and `--json` output; exit codes; colors dropped when piped or with
+    `NO_COLOR`.
+  - TUI: render into an in-memory terminal backend and snapshot the screen
+    buffer; scripted key and mouse events; a size matrix (80x24 up to wide)
+    **(verify the TUI library's test support)**.
+  - GUI: view-model tests first; then whatever the chosen toolkit supports,
+    such as headless interaction tests, screenshot comparison and
+    accessibility-tree checks; plus a launch smoke test in CI.
+  - Performance budgets (7.1) are measured by the same harness where possible.
 - **Hardware verification.** CI runners have no GPUs and few sensors, so
   hardware milestones (M2, M5c, M8, M9) need "verified on named hardware" or a
   community-tester sign-off in their exit criteria, and those checks are not
@@ -906,8 +922,64 @@ Enthusiast audiences first.
   (`cargo-dist` may help **(verify)**), with the signing budget decided before
   the first release (check free signing programs for open source **(verify)**).
   No auto-update in v1: at most a version check, off by default.
-- **Diagnostics.** `surtr diag` produces a redacted bundle for bug reports
-  (versions, capabilities, logs, no identifiers unless the user opts in).
+- **Diagnostics.** `surtr diag` produces a redacted bundle for bug reports;
+  see 8.1.
+
+### 8.1 Bug reports: logging and the diagnostic bundle
+
+Goal: when someone files an issue, one command (or one button) gives
+maintainers everything needed to reproduce it, without leaking personal data
+and without the reporter having to know what matters.
+
+**Logging (always on, local only).**
+- Structured logging (a Rust `tracing`-style setup **(verify crate choice)**)
+  with per-component targets (backend, core, service, worker, plugin, front
+  end) and levels; default `info`, raised per component with a flag or setting.
+- Rotating log files in the per-user log directory, size- and age-capped. The
+  privileged service writes its own log, readable by the installing user.
+- A panic hook in every process records the panic message and a backtrace.
+  Worker and plugin stderr is captured into the log with the run id.
+- Logs never contain secrets (API tokens, keys) and avoid identifiers; paths
+  under the user's home are written as `~`.
+
+**The bundle: `surtr diag`.**
+- One file (`surtr-diag-<date>.zip`) with a versioned JSON manifest and a
+  `summary.md` on top. `surtr diag --summary` prints only the summary as a
+  Markdown block, ready to paste into an issue; the zip is attached.
+- Contents, each section selectable:
+  - versions: Surtr, build target and features, OS and kernel, GPU driver
+    versions, PawnIO and module versions, plugin list and versions;
+  - the capabilities matrix (`get_capabilities`) for every backend;
+  - a redacted hardware snapshot (`surtr-model` already has no identifiers);
+  - recent logs from all processes;
+  - optionally a run record (`--run <id>`) or the last failed run, and a short
+    window of recent sensor history (for example the last 5 minutes);
+  - OS events relevant to stability (WHEA on Windows, MCE and driver errors
+    on Linux), summarized;
+  - settings with tokens and keys removed.
+- **Privacy:** no host names, serial numbers, MAC addresses or user names by
+  default (opt-in only); the reporter sees a preview of exactly what is
+  included before the file is written; nothing is uploaded, ever. Size-capped.
+- **Hardware-support dumps:** `surtr diag --hardware` adds raw, redacted
+  dumps for new-hardware requests (SMBIOS tables, the `hwmon` sysfs tree, WMI
+  and NVML/ADLX query results, unknown sensor ids). With the reporter's
+  consent these become test fixtures in `fixtures/`, so community reports
+  turn directly into tests.
+- Works when the daemon is down or crashing (reads logs and state from disk).
+  After a crash, the GUI/TUI offers to create a report on the next start.
+- Same command everywhere: CLI `surtr diag`, a "Create bug report" action in
+  the TUI and GUI, and a `get_diagnostics` MCP tool that returns only the
+  summary (never the raw dumps).
+
+**Issue templates** (GitHub issue forms): bug report (asks for the
+`summary.md` block and the zip), hardware support request (asks for
+`surtr diag --hardware`), and stress-test failure (asks for `--run <id>`).
+
+**Milestones:** logging and panic hooks from M3 (the first long-running
+process, the TUI); `surtr diag` with versions,
+capabilities, snapshot and logs at M3; hardware dumps at M2/M3 alongside
+the first sensor backends; run records and OS events at M6; issue templates
+before the repository goes public.
 
 ## 9. Licensing and governance
 
@@ -933,10 +1005,10 @@ Decide before first public release:
 | M0 | Foundations | Workspace, `surtr-model`, `Provider` trait, mock provider, CI matrix on 3 OS, license chosen |
 | M1 | Inspect (driverless) | `surtr --json` prints CPU/memory/OS on Windows + Linux + macOS; ARM64 builds run; `get_capabilities` reports what each backend can and cannot read |
 | M2 | Sensors | GPU (NVML and amdgpu sysfs; ADLX and IGCL optional, not exit-gating until their terms are read) including multi-GPU, per-process VRAM and throttle reasons; Linux `hwmon`, Windows driverless sensors, SQLite history; verified on named hardware |
-| M3 | TUI v1 + CLI | `surtr-view` and shared theme tokens (7.1); `surtr tui` with Overview, CPU, Sensors and multi-GPU views for desktop, headless and SSH use; CLI `status`, `info`, `sensors`, `watch` at parity with those views. **The GUI toolkit is not chosen yet** (7.1) |
+| M3 | TUI v1 + CLI | `surtr-view` and shared theme tokens (7.1); `surtr tui` with Overview, CPU, Sensors and multi-GPU views for desktop, headless and SSH use; CLI `status`, `info`, `sensors`, `watch` at parity with those views; structured logging, panic hooks and `surtr diag` v1 (8.1); CLI and TUI test approach agreed and in CI (8). **The GUI toolkit is not chosen yet** (7.1) |
 | M4 | Export | Prometheus `/metrics`, CSV/JSON export, Grafana dashboards: Overview and AI workstation (per-GPU, throttle reasons); per-user daemon (`surtr serve`) with user-level service units, alert engine (threshold and rate-of-change) and native notifications |
 | M5 | Local API + MCP (read-only) | `surtr-mcp` with the `read` tools whose dependencies exist (run tools arrive at M6, `correlate_metrics` at M12), auth, audit log; example agent session documented |
-| M5b | GUI v1 | **Toolkit decision gate** (spike in 7.1, run here, not earlier); GUI Overview, CPU, Sensors screens at parity with the TUI/CLI on all three OS, built on `surtr-view` and the local API; minimal daemon-owned tray (status dot, tooltip, open, quit, close-to-tray; 5.2.1), alerts and notifications come from the M4 daemon |
+| M5b | GUI v1 | **Toolkit decision gate** (spike in 7.1, run here, not earlier); GUI Overview, CPU, Sensors screens at parity with the TUI/CLI on all three OS, built on `surtr-view` and the local API; GUI test approach agreed and in CI (8); minimal daemon-owned tray (status dot, tooltip, open, quit, close-to-tray; 5.2.1), alerts and notifications come from the M4 daemon |
 | M5c | Read-only privileged sensors | The privileged-service split (no UI, no network, narrow operations, caller check, version handshake) with a Linux root helper and Windows PawnIO **read-only** operations (temperature, package power, voltage, effective clock), so M6 limits are real; no write paths; verified on named hardware |
 | M6 | Stress v1 | `surtr-stress` with the `Workload` trait and worker-process runner; verified built-in CPU test; shared run-event schema and plugin protocol v0 documented; host limits, run records + HTML report; MCP `run` scope with per-run confirmation; CPU stress is refused (or capped to a short low-risk mode) when no temperature or power limit sensor is available, so it is Linux first and Windows once M5c sensors exist; run journal with post-reset recovery |
 | M7 | Stress v2 + SKU DB | Built-in memory, storage and GPU tests; first example plugin proving the protocol with a real workload, with the minimum plugin trust gate (explicit enable, capability prompt, job-object/rlimit isolation); SKU database and contribution workflow |
@@ -1056,7 +1128,8 @@ The repository is private for now. Do these when switching it to public:
 - [ ] **Code of conduct:** add `CODE_OF_CONDUCT.md` with a non-personal
       reporting contact (a project alias or a form, not a personal address).
 - [ ] **Contributing:** add `CONTRIBUTING.md` (DCO sign-off, how to run tests),
-      issue and PR templates, and the SKU-entry and sensor-mapping templates
+      issue and PR templates (bug, hardware support and stress-failure forms
+      that ask for the `surtr diag` output, section 8.1), and the SKU-entry and sensor-mapping templates
       (section 9).
 - [ ] **History check:** confirm every commit's author and committer address
       is the public GitHub one, and that no secrets, tokens, internal paths or

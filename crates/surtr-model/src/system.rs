@@ -23,7 +23,9 @@ pub struct OsInfo {
     pub name: Field<String>,
     /// Version or build string.
     pub version: Field<String>,
-    /// Architecture the OS runs on.
+    /// Kernel release (Linux, Darwin). On Windows the build is in `version`.
+    pub kernel: Field<String>,
+    /// Architecture the OS runs on (native, even if Surtr runs emulated).
     pub arch: Field<Arch>,
 }
 
@@ -147,6 +149,7 @@ mod tests {
             os: OsInfo {
                 name: src.tag("Test OS".to_owned()),
                 version: None,
+                kernel: None,
                 arch: src.tag(Arch::Aarch64),
             },
             cpus: vec![CpuInfo {

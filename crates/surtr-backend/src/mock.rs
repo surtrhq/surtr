@@ -90,6 +90,7 @@ impl MockProvider {
             os: OsInfo {
                 name: info.tag("Mock OS".to_owned()),
                 version: info.tag("1.0".to_owned()),
+                kernel: info.tag("1.0.0-mock".to_owned()),
                 arch: info.tag(Arch::X86_64),
             },
             cpus: vec![CpuInfo {

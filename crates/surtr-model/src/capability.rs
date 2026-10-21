@@ -41,6 +41,29 @@ pub enum Feature {
     GpuTuning,
 }
 
+impl Feature {
+    /// Every feature, in display order.
+    pub const ALL: &'static [Feature] = &[
+        Self::CpuIdentity,
+        Self::CpuLoad,
+        Self::CpuClock,
+        Self::CpuTemperature,
+        Self::CpuPower,
+        Self::CpuVoltage,
+        Self::MemoryInfo,
+        Self::MemoryTimings,
+        Self::GpuIdentity,
+        Self::GpuSensors,
+        Self::GpuProcesses,
+        Self::GpuThrottleReasons,
+        Self::StorageHealth,
+        Self::BoardSensors,
+        Self::FanControl,
+        Self::CpuTuning,
+        Self::GpuTuning,
+    ];
+}
+
 /// Whether a [`Feature`] works here, and if not, why. Front ends turn this into
 /// an explicit "not available" state instead of a blank.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

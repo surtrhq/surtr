@@ -1,0 +1,23 @@
+[package]
+name = "surtr-cli"
+description = "The surtr command-line tool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "surtr"
+path = "src/main.rs"
+
+[dependencies]
+surtr-model.workspace = true
+surtr-backend = { workspace = true, features = ["mock"] }
+surtr-backend-native.workspace = true
+clap = { version = "4.6.7", features = ["derive"] }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
