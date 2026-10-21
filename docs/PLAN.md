@@ -1,6 +1,6 @@
 # Surtr: rough plan
 
-Status: draft v0.4. Everything here is a plan, not a commitment. Items marked
+Status: draft v0.5. Everything here is a plan, not a commitment. Items marked
 **(verify)** rely on third-party APIs or crates whose current state has not
 been checked.
 
