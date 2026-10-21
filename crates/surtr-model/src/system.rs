@@ -103,6 +103,9 @@ pub struct MemoryModule {
 /// One GPU.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct GpuInfo {
+    /// Device name used by this GPU's sensors, for example `"nvidia0"`.
+    #[serde(default)]
+    pub device: String,
     /// Vendor.
     pub vendor: Field<GpuVendor>,
     /// Product name.

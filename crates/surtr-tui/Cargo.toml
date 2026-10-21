@@ -1,0 +1,21 @@
+[package]
+name = "surtr-tui"
+description = "Terminal UI for Surtr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+surtr-model.workspace = true
+surtr-core.workspace = true
+surtr-view.workspace = true
+ratatui = "0.30"
+
+[dev-dependencies]
+surtr-backend = { workspace = true, features = ["mock"] }
+insta = "1.49.0"
+
+[lints]
+workspace = true

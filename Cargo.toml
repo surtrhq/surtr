@@ -18,6 +18,7 @@ surtr-backend-amd = { path = "crates/surtr-backend-amd" }
 surtr-core = { path = "crates/surtr-core" }
 surtr-store = { path = "crates/surtr-store" }
 surtr-view = { path = "crates/surtr-view" }
+surtr-tui = { path = "crates/surtr-tui" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

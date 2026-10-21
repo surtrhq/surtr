@@ -365,6 +365,7 @@ impl Provider for AmdProvider {
             .cards
             .iter()
             .map(|card| GpuInfo {
+                device: card.device.clone(),
                 vendor: sysfs.tag(GpuVendor::Amd),
                 name: self
                     .name(card)

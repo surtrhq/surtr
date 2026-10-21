@@ -20,7 +20,8 @@ milestones, and [the mockups](docs/mockups/README.md) for the intended UI.
 | [`surtr-core`](crates/surtr-core) | The `Hub`, which combines the OS backend and GPU backends into one view. |
 | [`surtr-store`](crates/surtr-store) | Sensor history in SQLite (compiled in, not shipped separately): retention and bucketed queries. |
 | [`surtr-view`](crates/surtr-view) | What every front end shows: view models, value formatting, health levels and theme tokens (dark and light). |
-| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `status`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, `record`, `history`, `completions`, with `--json` and `--mock`. Colored on a terminal, plain when piped or with `NO_COLOR`. |
+| [`surtr-tui`](crates/surtr-tui) | `surtr tui`: Overview, Sensors (with trends), GPU and Capabilities views; keyboard and mouse; works over SSH. |
+| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `status`, `tui`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, `record`, `history`, `completions`, with `--json` and `--mock`. Colored on a terminal, plain when piped or with `NO_COLOR`. |
 
 ## Building
 

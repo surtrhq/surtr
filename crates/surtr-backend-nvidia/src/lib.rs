@@ -201,6 +201,7 @@ impl Provider for NvidiaProvider {
             .gpus
             .iter()
             .map(|g| GpuInfo {
+                device: g.name.clone(),
                 vendor: src.tag(GpuVendor::Nvidia),
                 name: self.nvml.name(g.handle).and_then(|n| src.tag(n)),
                 vram_bytes: self

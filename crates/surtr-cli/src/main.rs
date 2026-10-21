@@ -19,6 +19,7 @@ mod style;
 const EXAMPLES: &str = "\
 Examples:
   surtr                          OS, CPU, memory and GPUs
+  surtr tui                      interactive terminal UI (works over SSH)
   surtr status                   health summary (exit code 0 ok, 2 warning, 3 critical)
   surtr sensors                  every sensor once
   surtr sensors --json           the same as JSON, with each value's source
@@ -68,6 +69,13 @@ enum Command {
     Sensors {
         /// Milliseconds between the priming read and the reported one; rate
         /// sensors such as CPU load need two samples.
+        #[arg(long, default_value_t = 1000)]
+        interval: u64,
+    },
+    /// Interactive terminal UI: overview, sensors with trends, GPUs and
+    /// capabilities. Works over SSH. Press ? inside for keys.
+    Tui {
+        /// Milliseconds between refreshes.
         #[arg(long, default_value_t = 1000)]
         interval: u64,
     },
@@ -250,6 +258,11 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
             )
         }
         Command::Completions { .. } => unreachable!("handled before hardware access"),
+        Command::Tui { interval } => {
+            let interval = Duration::from_millis((*interval).max(100));
+            surtr_tui::run(hub, interval, &process_name)?;
+            Ok(String::new())
+        }
         Command::Caps => {
             let capabilities = hub.capabilities();
             out(

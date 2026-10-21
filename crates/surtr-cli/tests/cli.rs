@@ -241,3 +241,15 @@ fn completions_need_no_hardware() {
     assert_eq!(code, Some(0));
     assert!(out.contains("surtr"));
 }
+
+// Piped output is not a terminal, so the TUI must refuse rather than hang.
+#[test]
+fn tui_refuses_without_a_terminal() {
+    let output = Command::new(env!("CARGO_BIN_EXE_surtr"))
+        .args(["--mock", "tui"])
+        .output()
+        .expect("failed to run surtr");
+    assert_eq!(output.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("needs an interactive terminal"), "{err}");
+}

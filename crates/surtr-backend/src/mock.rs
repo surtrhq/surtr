@@ -113,6 +113,7 @@ impl MockProvider {
                 modules: Vec::new(),
             },
             gpus: vec![GpuInfo {
+                device: "gpu0".to_owned(),
                 vendor: info.tag(GpuVendor::Other("Mock".to_owned())),
                 name: info.tag("Mock GPU 16 GB".to_owned()),
                 vram_bytes: info.tag(16 * 1024 * 1024 * 1024),
