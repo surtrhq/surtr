@@ -1,0 +1,12 @@
+---
+source: crates/surtr-cli/tests/cli.rs
+expression: out
+---
+Status: WARNING
+
+  CPU        47.3 % load · 4385 MHz · 56.0 °C
+  Memory     32.0 GiB total
+  gpu0       60.6 °C · 192.5 W · 6.1 GiB VRAM
+
+Findings
+  !  gpu0 is slowed down by: power limit.

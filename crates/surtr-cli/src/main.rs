@@ -1,8 +1,8 @@
 //! The `surtr` command.
 
-use std::{error::Error, path::PathBuf, process::ExitCode, thread, time::Duration};
+use std::{cell::Cell, error::Error, path::PathBuf, process::ExitCode, thread, time::Duration};
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use serde_json::json;
 use surtr_backend::{Provider, ProviderError, mock::MockProvider};
 use surtr_backend_amd::AmdProvider;
@@ -14,10 +14,24 @@ use surtr_store::Store;
 
 mod history;
 mod render;
+mod style;
+
+const EXAMPLES: &str = "\
+Examples:
+  surtr                          OS, CPU, memory and GPUs
+  surtr status                   health summary (exit code 0 ok, 2 warning, 3 critical)
+  surtr sensors                  every sensor once
+  surtr sensors --json           the same as JSON, with each value's source
+  surtr gpu throttle             why each GPU is below its potential clock
+  surtr record --count 60        one minute of history
+  surtr history cpu/load --since 10m --bucket 1m
+  surtr --mock info              the built-in test machine
+
+Colors turn off when output is piped or NO_COLOR is set.";
 
 /// Hardware inspection, monitoring and stress testing.
 #[derive(Debug, Parser)]
-#[command(name = "surtr", version)]
+#[command(name = "surtr", version, after_help = EXAMPLES)]
 struct Cli {
     /// Print JSON instead of text.
     #[arg(long, global = true)]
@@ -35,6 +49,19 @@ struct Cli {
 enum Command {
     /// Show OS, CPU, memory and GPU information (the default).
     Info,
+    /// Show a health summary with plain-language findings. Exit code: 0 ok,
+    /// 2 warning, 3 critical (1 is an error running surtr).
+    Status {
+        /// Milliseconds between the priming read and the reported one.
+        #[arg(long, default_value_t = 1000)]
+        interval: u64,
+    },
+    /// Print a shell completion script, for example
+    /// `surtr completions powershell >> $PROFILE`.
+    Completions {
+        /// The shell.
+        shell: clap_complete::Shell,
+    },
     /// Show what Surtr can and cannot read on this machine.
     Caps,
     /// Read every sensor once and show the values.
@@ -147,11 +174,18 @@ fn hub(mock: bool) -> Result<Hub, String> {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = hub(cli.mock).and_then(|hub| run(&cli, &hub).map_err(|e| e.to_string()));
+    // Completions need no hardware access.
+    if let Some(Command::Completions { shell }) = &cli.command {
+        clap_complete::generate(*shell, &mut Cli::command(), "surtr", &mut std::io::stdout());
+        return ExitCode::SUCCESS;
+    }
+    let code = Cell::new(0);
+    let result = hub(cli.mock).and_then(|hub| run(&cli, &hub, &code).map_err(|e| e.to_string()));
     match result {
         Ok(output) => {
-            print!("{output}");
-            ExitCode::SUCCESS
+            // anstream drops styling when not writing to a terminal.
+            anstream::print!("{output}");
+            ExitCode::from(code.get())
         }
         Err(err) => {
             eprintln!("surtr: {err}");
@@ -160,7 +194,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: &Cli, hub: &Hub) -> Result<String, Box<dyn Error>> {
+/// Runs the command and returns its output; `code` receives a non-zero exit
+/// code for commands that report one (`status`).
+fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> {
     let providers = hub.provider_ids();
     let names = providers.join(", ");
     let out = |value: serde_json::Value, text: String| -> Result<String, Box<dyn Error>> {
@@ -178,6 +214,42 @@ fn run(cli: &Cli, hub: &Hub) -> Result<String, Box<dyn Error>> {
                 render::info(&names, &system),
             )
         }
+        Command::Status { interval } => {
+            hub.read();
+            thread::sleep(Duration::from_millis(*interval));
+            let samples = hub.read();
+            let status = surtr_view::status(
+                &hub.system_info(),
+                &samples,
+                &hub.throttle_reasons(),
+                &hub.capabilities(),
+            );
+            code.set(match status.level {
+                surtr_view::Level::Ok => 0,
+                surtr_view::Level::Warn => 2,
+                surtr_view::Level::Critical => 3,
+            });
+            let findings: Vec<_> = status
+                .findings
+                .iter()
+                .map(|f| json!({ "level": f.level.map(|l| l.label()), "message": f.message }))
+                .collect();
+            let parts: Vec<_> = status
+                .parts
+                .iter()
+                .map(|r| json!({ "part": r.label, "summary": r.cells[0].text }))
+                .collect();
+            out(
+                json!({
+                    "providers": providers,
+                    "level": status.level.label(),
+                    "parts": parts,
+                    "findings": findings,
+                }),
+                render::status(&status),
+            )
+        }
+        Command::Completions { .. } => unreachable!("handled before hardware access"),
         Command::Caps => {
             let capabilities = hub.capabilities();
             out(

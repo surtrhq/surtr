@@ -1,0 +1,5 @@
+---
+source: crates/surtr-cli/tests/cli.rs
+expression: out
+---
+gpu0        power limit

@@ -1,0 +1,17 @@
+---
+source: crates/surtr-cli/tests/cli.rs
+expression: out
+---
+cpu0
+  Package temperature                    56.0 °C
+  Package power                           69.2 W
+  Total load                              47.3 %
+  Effective clock                       4385 MHz
+
+gpu0
+  GPU temperature                        60.6 °C
+  Board power                            192.5 W
+  VRAM used                              6.1 GiB
+  Fan speed                             1221 RPM
+
+Providers: mock. Run with --json to see where each value came from.

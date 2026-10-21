@@ -1,0 +1,28 @@
+---
+source: crates/surtr-cli/tests/cli.rs
+expression: out
+---
+OS
+  Name          Mock OS
+  Version       1.0
+  Kernel        1.0.0-mock
+  Architecture  x86-64
+
+CPU 0
+  Name          Mock 8-Core Processor
+  Vendor        Mock
+  Cores         8
+  Threads       16
+  Base clock    3800 MHz
+  Max clock     5000 MHz
+
+Memory
+  Total         32.0 GiB
+
+GPU 0
+  Name          Mock GPU 16 GB
+  Vendor        Mock
+  Memory        16.0 GiB
+  Driver        1.0
+
+Providers: mock. Run with --json to see where each value came from.

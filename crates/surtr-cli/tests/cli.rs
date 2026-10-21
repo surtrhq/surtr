@@ -189,3 +189,52 @@ fn record_then_history() {
     assert!(!ok);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Runs surtr and returns (exit code, stdout).
+fn surtr_code(args: &[&str]) -> (Option<i32>, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_surtr"))
+        .args(args)
+        .output()
+        .expect("failed to run surtr");
+    (
+        output.status.code(),
+        String::from_utf8(output.stdout).expect("stdout is not UTF-8"),
+    )
+}
+
+// Text output of every command against the mock, reviewed as snapshots
+// (issue #13). Piped output carries no color codes.
+#[test]
+fn mock_text_snapshots() {
+    let cases: [(&str, &[&str]); 6] = [
+        ("info", &["--mock", "info"]),
+        ("caps", &["--mock", "caps"]),
+        ("sensors", &["--mock", "sensors", "--interval", "0"]),
+        ("gpu_procs", &["--mock", "gpu", "procs"]),
+        ("gpu_throttle", &["--mock", "gpu", "throttle"]),
+        ("status", &["--mock", "status", "--interval", "0"]),
+    ];
+    for (name, args) in cases {
+        let (_, out) = surtr_code(args);
+        assert!(!out.contains('\u{1b}'), "{name}: color codes in piped output");
+        insta::assert_snapshot!(name, out);
+    }
+}
+
+#[test]
+fn status_exit_codes() {
+    // The mock GPU is held at its power limit: a warning.
+    let (code, _) = surtr_code(&["--mock", "status", "--interval", "0"]);
+    assert_eq!(code, Some(2));
+    let (code, out) = surtr_code(&["--mock", "status", "--interval", "0", "--json"]);
+    assert_eq!(code, Some(2));
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["level"], "warm");
+}
+
+#[test]
+fn completions_need_no_hardware() {
+    let (code, out) = surtr_code(&["completions", "bash"]);
+    assert_eq!(code, Some(0));
+    assert!(out.contains("surtr"));
+}

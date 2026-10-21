@@ -1,29 +1,62 @@
-//! Plain-text layout of the shared view models (`surtr-view`). Styling
-//! (color, tables, charts) comes with the CLI quality pass in M3.
+//! Text layout of the shared view models (`surtr-view`), styled by role.
+//! Styling is stripped automatically when output is piped or `NO_COLOR` is
+//! set (see `style`).
 
 use std::fmt::Write;
 
 use surtr_model::{Capabilities, GpuProcess, SystemInfo, ThrottleState};
 use surtr_view::{
-    Section, capability_rows, process_rows, sensor_sections, system_sections, throttle_rows,
+    Cell, Level, Role, Section, Status, capability_rows, process_rows, sensor_sections,
+    system_sections, throttle_rows,
 };
+
+use crate::style::paint;
+
+fn heading(out: &mut String, text: &str) {
+    // Writing to a String can't fail.
+    let _ = writeln!(out, "{}", paint(Role::Heading, text));
+}
+
+fn footer(out: &mut String, text: &str) {
+    let _ = writeln!(out, "\n{}", paint(Role::Muted, text));
+}
+
+/// A cell left-aligned in `width` columns.
+fn left(cell: &Cell, width: usize) -> String {
+    paint(cell.role, &format!("{:<width$}", cell.text))
+}
+
+/// A cell right-aligned in `width` columns.
+fn right(cell: &Cell, width: usize) -> String {
+    paint(cell.role, &format!("{:>width$}", cell.text))
+}
+
+fn sections(out: &mut String, sections: &[Section], row: impl Fn(&mut String, &surtr_view::Row)) {
+    for (i, section) in sections.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        heading(out, &section.title);
+        for r in &section.rows {
+            row(out, r);
+        }
+    }
+}
 
 /// The `surtr info` report.
 pub fn info(provider: &str, system: &SystemInfo) -> String {
     let mut out = String::new();
-    for (i, section) in system_sections(system).iter().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-        // Writing to a String can't fail.
-        let _ = writeln!(out, "{}", section.title);
-        for row in &section.rows {
-            let _ = writeln!(out, "  {:<14}{}", row.label, row.cells[0].text);
-        }
-    }
-    let _ = writeln!(
-        out,
-        "\nProviders: {provider}. Run with --json to see where each value came from."
+    sections(&mut out, &system_sections(system), |out, row| {
+        let label = paint(Role::Muted, &format!("{:<14}", row.label));
+        let _ = writeln!(
+            out,
+            "  {label}{}",
+            paint(row.cells[0].role, &row.cells[0].text)
+        );
+    });
+    footer(
+        &mut out,
+        &format!("Providers: {provider}. Run with --json to see where each value came from."),
     );
     out
 }
@@ -33,26 +66,15 @@ pub fn info(provider: &str, system: &SystemInfo) -> String {
 pub fn caps(provider: &str, capabilities: &Capabilities) -> String {
     let mut out = String::new();
     for row in capability_rows(capabilities) {
-        let _ = writeln!(out, "{:<22}{}", row.label, row.cells[0].text);
+        let _ = writeln!(
+            out,
+            "{:<22}{}",
+            row.label,
+            paint(row.cells[0].role, &row.cells[0].text)
+        );
     }
-    let _ = writeln!(out, "\nProviders: {provider}.");
+    footer(&mut out, &format!("Providers: {provider}."));
     out
-}
-
-fn sections(
-    out: &mut String,
-    sections: &[Section],
-    mut row: impl FnMut(&mut String, &surtr_view::Row),
-) {
-    for (i, section) in sections.iter().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-        let _ = writeln!(out, "{}", section.title);
-        for r in &section.rows {
-            row(out, r);
-        }
-    }
 }
 
 /// The `surtr sensors` report, grouped by device in provider order.
@@ -62,11 +84,11 @@ pub fn sensors(provider: &str, samples: &[surtr_core::Sample]) -> String {
         out.push_str("No sensors available on this machine yet.\n");
     }
     sections(&mut out, &sensor_sections(samples), |out, row| {
-        let _ = writeln!(out, "  {:<32}{:>14}", row.label, row.cells[0].text);
+        let _ = writeln!(out, "  {:<32}{}", row.label, right(&row.cells[0], 14));
     });
-    let _ = writeln!(
-        out,
-        "\nProviders: {provider}. Run with --json to see where each value came from."
+    footer(
+        &mut out,
+        &format!("Providers: {provider}. Run with --json to see where each value came from."),
     );
     out
 }
@@ -77,21 +99,24 @@ pub fn gpu_processes(processes: &[GpuProcess]) -> String {
         return "No processes are using a GPU.\n".to_owned();
     }
     let mut out = String::new();
-    let groups = process_rows(processes);
-    for (i, section) in groups.iter().enumerate() {
+    for (i, section) in process_rows(processes).iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
-        let _ = writeln!(out, "{}", section.title);
-        let _ = writeln!(out, "  {:<10}{:<11}{:>12}  Name", "PID", "Type", "Memory");
+        heading(&mut out, &section.title);
+        let header = format!("  {:<10}{:<11}{:>12}  Name", "PID", "Type", "Memory");
+        let _ = writeln!(out, "{}", paint(Role::Muted, &header));
         for row in &section.rows {
             let [kind, memory, name] = &row.cells[..] else {
                 continue;
             };
             let _ = writeln!(
                 out,
-                "  {:<10}{:<11}{:>12}  {}",
-                row.label, kind.text, memory.text, name.text
+                "  {:<10}{}{}  {}",
+                row.label,
+                left(kind, 11),
+                right(memory, 12),
+                paint(name.role, &name.text)
             );
         }
     }
@@ -105,8 +130,46 @@ pub fn throttle(states: &[ThrottleState]) -> String {
     }
     let mut out = String::new();
     for row in throttle_rows(states) {
-        let reasons: Vec<&str> = row.cells.iter().map(|c| c.text.as_str()).collect();
+        let reasons: Vec<String> = row.cells.iter().map(|c| paint(c.role, &c.text)).collect();
         let _ = writeln!(out, "{:<12}{}", row.label, reasons.join(", "));
+    }
+    out
+}
+
+/// The `surtr status` report.
+pub fn status(status: &Status) -> String {
+    let mut out = String::new();
+    let (word, role) = match status.level {
+        Level::Ok => ("OK", Role::Ok),
+        Level::Warn => ("WARNING", Role::Warn),
+        Level::Critical => ("CRITICAL", Role::Critical),
+    };
+    let _ = writeln!(
+        out,
+        "{} {}\n",
+        paint(Role::Heading, "Status:"),
+        paint(role, word)
+    );
+    for row in &status.parts {
+        let label = paint(Role::Muted, &format!("{:<10}", row.label));
+        let _ = writeln!(
+            out,
+            "  {label} {}",
+            paint(row.cells[0].role, &row.cells[0].text)
+        );
+    }
+    if !status.findings.is_empty() {
+        out.push('\n');
+        heading(&mut out, "Findings");
+        for f in &status.findings {
+            let (mark, role) = match f.level {
+                Some(Level::Critical) => ("!!", Role::Critical),
+                Some(Level::Warn) => ("! ", Role::Warn),
+                Some(Level::Ok) => ("  ", Role::Ok),
+                None => ("i ", Role::Muted),
+            };
+            let _ = writeln!(out, "  {} {}", paint(role, mark), f.message);
+        }
     }
     out
 }
@@ -117,6 +180,27 @@ mod tests {
     use surtr_backend::{Provider, mock::MockProvider};
     use surtr_core::Sample;
     use surtr_model::Feature;
+
+    // The tests check text layout; strip styling first. These shadow the
+    // functions imported from `super`.
+    fn plain(s: String) -> String {
+        anstream::adapter::strip_str(&s).to_string()
+    }
+    fn info(p: &str, s: &SystemInfo) -> String {
+        plain(super::info(p, s))
+    }
+    fn caps(p: &str, c: &Capabilities) -> String {
+        plain(super::caps(p, c))
+    }
+    fn sensors(p: &str, s: &[Sample]) -> String {
+        plain(super::sensors(p, s))
+    }
+    fn gpu_processes(p: &[GpuProcess]) -> String {
+        plain(super::gpu_processes(p))
+    }
+    fn throttle(t: &[ThrottleState]) -> String {
+        plain(super::throttle(t))
+    }
 
     #[test]
     fn sensors_grouped_by_device() {

@@ -9,10 +9,12 @@
 
 pub mod format;
 pub mod health;
+pub mod status;
 pub mod theme;
 mod view;
 
 pub use health::Level;
+pub use status::{Finding, Status, status};
 pub use theme::{Rgb, Role, Theme};
 pub use view::{
     Cell, Row, Section, capability_rows, process_rows, sensor_sections, system_sections,

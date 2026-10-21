@@ -1,0 +1,7 @@
+---
+source: crates/surtr-cli/tests/cli.rs
+expression: out
+---
+gpu0
+  PID       Type             Memory  Name
+  4242      compute         4.0 GiB  mock-inference

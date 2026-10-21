@@ -1,0 +1,23 @@
+---
+source: crates/surtr-cli/tests/cli.rs
+expression: out
+---
+CPU identity          available
+CPU load              available
+CPU clocks            available
+CPU temperature       available
+CPU power             available
+CPU voltage           unknown
+Memory size           available
+Memory timings        needs privileged backend
+GPU identity          available
+GPU sensors           available
+GPU processes         available
+GPU throttle reasons  available
+Storage health        unknown
+Board sensors         unknown
+Fan control           unsupported (the mock provider is read-only)
+CPU tuning            unknown
+GPU tuning            unknown
+
+Providers: mock.
