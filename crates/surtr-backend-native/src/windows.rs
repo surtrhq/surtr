@@ -1,12 +1,24 @@
 //! Windows: registry, `GlobalMemoryStatusEx`, `IsWow64Process2` and
 //! `GetLogicalProcessorInformationEx`. No driver or elevation needed.
 
-use std::{mem, ptr, slice};
+use std::{
+    collections::HashMap,
+    mem, ptr, slice,
+    sync::{Mutex, PoisonError},
+};
 
-use surtr_model::{Arch, CpuInfo, MemoryInfo, OsInfo, Source, SystemInfo};
+use surtr_model::{
+    Arch, Capabilities, CpuInfo, Feature, MemoryInfo, OsInfo, SensorDescriptor, SensorId,
+    SensorKind, SensorReading, Source, Support, SystemInfo, Timestamp,
+};
 use windows_sys::Win32::{
     Foundation::ERROR_SUCCESS,
     System::{
+        Performance::{
+            PDH_CSTATUS_NEW_DATA, PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE_ITEM_W,
+            PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PDH_MORE_DATA, PdhAddEnglishCounterW,
+            PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW,
+        },
         Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW},
         SystemInformation::{
             GetLogicalProcessorInformationEx, GlobalMemoryStatusEx, IMAGE_FILE_MACHINE,
@@ -14,11 +26,18 @@ use windows_sys::Win32::{
             LOGICAL_PROCESSOR_RELATIONSHIP, MEMORYSTATUSEX, RelationProcessorCore,
             RelationProcessorPackage, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
         },
-        Threading::{GetCurrentProcess, IsWow64Process2},
+        Threading::{
+            GetActiveProcessorCount, GetActiveProcessorGroupCount, GetCurrentProcess,
+            IsWow64Process2,
+        },
     },
 };
 
-use crate::parse::{self, GroupMasks};
+use crate::{
+    descriptor,
+    parse::{self, GroupMasks, PdhInstance},
+    reading,
+};
 
 pub const ID: &str = "windows";
 pub const SUPPORTED: bool = true;
@@ -113,15 +132,15 @@ fn native_arch() -> Option<Arch> {
     })
 }
 
-/// Physical memory visible to the OS, in bytes.
+/// `(total, available)` physical memory visible to the OS, in bytes.
 #[allow(unsafe_code)]
-fn total_memory() -> Option<u64> {
+fn memory_status() -> Option<(u64, u64)> {
     // SAFETY: MEMORYSTATUSEX is plain data; all-zero is a valid value.
     let mut status: MEMORYSTATUSEX = unsafe { mem::zeroed() };
     status.dwLength = mem::size_of::<MEMORYSTATUSEX>() as u32;
     // SAFETY: `status` is a live, correctly sized struct with `dwLength` set.
     let ok = unsafe { GlobalMemoryStatusEx(&mut status) };
-    (ok != 0 && status.ullTotalPhys > 0).then_some(status.ullTotalPhys)
+    (ok != 0 && status.ullTotalPhys > 0).then_some((status.ullTotalPhys, status.ullAvailPhys))
 }
 
 /// Group masks of every processor record of one relationship kind.
@@ -193,8 +212,8 @@ pub fn system_info() -> SystemInfo {
         os: os_info(),
         cpus: cpus(),
         memory: MemoryInfo {
-            total_bytes: total_memory()
-                .and_then(|t| Source::new(ID, "GlobalMemoryStatusEx").tag(t)),
+            total_bytes: memory_status()
+                .and_then(|(total, _)| Source::new(ID, "GlobalMemoryStatusEx").tag(total)),
             modules: Vec::new(),
         },
         gpus: Vec::new(),
@@ -254,4 +273,307 @@ fn cpus() -> Vec<CpuInfo> {
         .into_iter()
         .map(|(cores, logical)| entry(Some(cores), Some(logical)))
         .collect()
+}
+
+/// `PDH_FMT_NOCAP100` from `pdh.h` (not exported by windows-sys): don't clamp
+/// percentages at 100, since processor performance exceeds 100 when boosting.
+const PDH_FMT_NOCAP100: u32 = 0x0000_8000;
+
+const LOAD_COUNTER: &str = r"\Processor Information(*)\% Processor Time";
+const PERF_COUNTER: &str = r"\Processor Information(*)\% Processor Performance";
+const FREQ_COUNTER: &str = r"\Processor Information(*)\Processor Frequency";
+
+/// A PDH query with the processor counters Surtr reads.
+struct Pdh {
+    query: PDH_HQUERY,
+    load: PDH_HCOUNTER,
+    perf: PDH_HCOUNTER,
+    freq: PDH_HCOUNTER,
+}
+
+// SAFETY: PDH query and counter handles are not tied to the creating thread,
+// and `State` keeps the `Pdh` behind a mutex so calls never overlap.
+#[allow(unsafe_code)]
+unsafe impl Send for Pdh {}
+
+impl std::fmt::Debug for Pdh {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Pdh")
+    }
+}
+
+impl Pdh {
+    #[allow(unsafe_code)]
+    fn open() -> Option<Self> {
+        // SAFETY: handles are plain values; zero is the "no handle" value.
+        let mut query: PDH_HQUERY = unsafe { mem::zeroed() };
+        // SAFETY: a null data source means live data; `query` is a valid
+        // out-pointer.
+        if unsafe { PdhOpenQueryW(ptr::null(), 0, &mut query) } != ERROR_SUCCESS {
+            return None;
+        }
+        let add = |path: &str| {
+            let path = wide(path);
+            // SAFETY: as above.
+            let mut counter: PDH_HCOUNTER = unsafe { mem::zeroed() };
+            // SAFETY: `query` is open, `path` is NUL-terminated and `counter`
+            // is a valid out-pointer.
+            let status = unsafe { PdhAddEnglishCounterW(query, path.as_ptr(), 0, &mut counter) };
+            (status == ERROR_SUCCESS).then_some(counter)
+        };
+        let (Some(load), Some(perf), Some(freq)) =
+            (add(LOAD_COUNTER), add(PERF_COUNTER), add(FREQ_COUNTER))
+        else {
+            // SAFETY: `query` is open and not used afterwards.
+            unsafe { PdhCloseQuery(query) };
+            return None;
+        };
+        let pdh = Self {
+            query,
+            load,
+            perf,
+            freq,
+        };
+        // Rate counters need two samples; take the first one now.
+        pdh.collect();
+        Some(pdh)
+    }
+
+    #[allow(unsafe_code)]
+    fn collect(&self) -> bool {
+        // SAFETY: `query` is open for the lifetime of `self`.
+        unsafe { PdhCollectQueryData(self.query) == ERROR_SUCCESS }
+    }
+
+    /// Valid values of one counter, by processor instance.
+    #[allow(unsafe_code)]
+    fn values(&self, counter: PDH_HCOUNTER, format: u32) -> HashMap<PdhInstance, f64> {
+        let (mut size, mut count) = (0u32, 0u32);
+        // SAFETY: a null buffer with zero size asks only for the size.
+        let status = unsafe {
+            PdhGetFormattedCounterArrayW(counter, format, &mut size, &mut count, ptr::null_mut())
+        };
+        if status != PDH_MORE_DATA || size == 0 {
+            return HashMap::new();
+        }
+        // u64 storage keeps the item array 8-byte aligned.
+        let mut buf = vec![0u64; (size as usize).div_ceil(8)];
+        // SAFETY: `buf` has at least `size` writable bytes.
+        let status = unsafe {
+            PdhGetFormattedCounterArrayW(
+                counter,
+                format,
+                &mut size,
+                &mut count,
+                buf.as_mut_ptr().cast(),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return HashMap::new();
+        }
+        // SAFETY: on success the buffer starts with `count` items; their name
+        // pointers point at NUL-terminated strings later in the same buffer.
+        let items = unsafe {
+            slice::from_raw_parts(
+                buf.as_ptr().cast::<PDH_FMT_COUNTERVALUE_ITEM_W>(),
+                count as usize,
+            )
+        };
+        items
+            .iter()
+            .filter(|item| {
+                let status = item.FmtValue.CStatus;
+                status == PDH_CSTATUS_VALID_DATA || status == PDH_CSTATUS_NEW_DATA
+            })
+            .filter_map(|item| {
+                // SAFETY: see above; the name lives in `buf`.
+                let name = unsafe {
+                    let start = item.szName;
+                    let mut len = 0;
+                    while *start.add(len) != 0 {
+                        len += 1;
+                    }
+                    String::from_utf16_lossy(slice::from_raw_parts(start, len))
+                };
+                // SAFETY: PDH_FMT_DOUBLE was requested, so the double member
+                // is the initialized one.
+                let value = unsafe { item.FmtValue.Anonymous.doubleValue };
+                Some((parse::pdh_instance(&name)?, value))
+            })
+            .collect()
+    }
+}
+
+impl Drop for Pdh {
+    #[allow(unsafe_code)]
+    fn drop(&mut self) {
+        // SAFETY: `query` is open and dropped exactly once.
+        unsafe { PdhCloseQuery(self.query) };
+    }
+}
+
+/// First flat logical-processor number of each processor group, plus the
+/// total at the end.
+#[allow(unsafe_code)]
+fn group_offsets() -> Vec<u32> {
+    // SAFETY: plain queries without pointers.
+    let groups = unsafe { GetActiveProcessorGroupCount() };
+    let mut offsets = Vec::with_capacity(usize::from(groups) + 1);
+    let mut next = 0;
+    for group in 0..groups {
+        offsets.push(next);
+        // SAFETY: as above.
+        next += unsafe { GetActiveProcessorCount(group) };
+    }
+    offsets.push(next);
+    offsets
+}
+
+/// Sensor state: the PDH query (if the counters exist) and the processor
+/// group layout used to number threads.
+#[derive(Debug)]
+pub struct State {
+    pdh: Option<Mutex<Pdh>>,
+    offsets: Vec<u32>,
+}
+
+impl State {
+    pub fn new() -> Self {
+        Self {
+            pdh: Pdh::open().map(Mutex::new),
+            offsets: group_offsets(),
+        }
+    }
+
+    fn threads(&self) -> u32 {
+        self.offsets.last().copied().unwrap_or(0)
+    }
+
+    fn thread_number(&self, group: u16, index: u32) -> Option<u32> {
+        let start = *self.offsets.get(usize::from(group))?;
+        let end = *self.offsets.get(usize::from(group) + 1)?;
+        (start + index < end).then_some(start + index)
+    }
+
+    pub fn capabilities(&self, caps: &mut Capabilities) {
+        if self.pdh.is_some() {
+            caps.set(Feature::CpuLoad, Support::Available);
+            caps.set(Feature::CpuClock, Support::Available);
+        }
+        // Without a driver Windows exposes none of these (plan, section 4).
+        for feature in [
+            Feature::CpuTemperature,
+            Feature::CpuPower,
+            Feature::CpuVoltage,
+            Feature::MemoryTimings,
+            Feature::BoardSensors,
+            Feature::FanControl,
+            Feature::CpuTuning,
+        ] {
+            caps.set(feature, Support::NeedsPrivilegedBackend);
+        }
+    }
+
+    pub fn sensors(&self) -> Vec<SensorDescriptor> {
+        let pdh = Source::new(ID, "pdh");
+        let mut out = Vec::new();
+        if self.pdh.is_some() {
+            out.push(descriptor(
+                "cpu/load",
+                SensorKind::Load,
+                "cpu",
+                "Total load",
+                &pdh,
+            ));
+            out.push(descriptor(
+                "cpu/clock",
+                SensorKind::Clock,
+                "cpu",
+                "Average clock (estimate)",
+                &pdh,
+            ));
+            for n in 0..self.threads() {
+                out.push(descriptor(
+                    &format!("cpu/thread{n}/load"),
+                    SensorKind::Load,
+                    "cpu",
+                    &format!("Thread {n} load"),
+                    &pdh,
+                ));
+            }
+            for n in 0..self.threads() {
+                out.push(descriptor(
+                    &format!("cpu/thread{n}/clock"),
+                    SensorKind::Clock,
+                    "cpu",
+                    &format!("Thread {n} clock (estimate)"),
+                    &pdh,
+                ));
+            }
+        }
+        out.push(descriptor(
+            "memory/used",
+            SensorKind::Memory,
+            "memory",
+            "Used",
+            &Source::new(ID, "GlobalMemoryStatusEx"),
+        ));
+        out
+    }
+
+    fn id(&self, instance: PdhInstance, what: &str) -> Option<SensorId> {
+        match instance {
+            PdhInstance::Total => Some(SensorId::new(format!("cpu/{what}"))),
+            PdhInstance::Thread { group, index } => {
+                let n = self.thread_number(group, index)?;
+                Some(SensorId::new(format!("cpu/thread{n}/{what}")))
+            }
+            PdhInstance::GroupTotal => None,
+        }
+    }
+
+    pub fn read(&self) -> Vec<SensorReading> {
+        let at = Timestamp::now();
+        let mut out = Vec::new();
+
+        if let Some(pdh) = &self.pdh {
+            let pdh = pdh.lock().unwrap_or_else(PoisonError::into_inner);
+            if pdh.collect() {
+                let load = pdh.values(pdh.load, PDH_FMT_DOUBLE);
+                let perf = pdh.values(pdh.perf, PDH_FMT_DOUBLE | PDH_FMT_NOCAP100);
+                let freq = pdh.values(pdh.freq, PDH_FMT_DOUBLE);
+                let mut loads: Vec<_> = load
+                    .into_iter()
+                    .filter_map(|(i, v)| Some((self.id(i, "load")?, v)))
+                    .collect();
+                // Effective clock estimate: nominal frequency times the
+                // performance ratio Windows reports.
+                let mut clocks: Vec<_> = perf
+                    .into_iter()
+                    .filter_map(|(i, p)| {
+                        let mhz = freq.get(&i)? * p / 100.0;
+                        Some((self.id(i, "clock")?, mhz))
+                    })
+                    .filter(|(_, mhz)| *mhz > 0.0)
+                    .collect();
+                loads.sort_by(|a, b| a.0.cmp(&b.0));
+                clocks.sort_by(|a, b| a.0.cmp(&b.0));
+                out.extend(
+                    loads
+                        .into_iter()
+                        .chain(clocks)
+                        .map(|(id, v)| reading(id, v, at)),
+                );
+            }
+        }
+
+        if let Some((total, available)) = memory_status() {
+            out.push(reading(
+                SensorId::new("memory/used"),
+                total.saturating_sub(available) as f64,
+                at,
+            ));
+        }
+        out
+    }
 }

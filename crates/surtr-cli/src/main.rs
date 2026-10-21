@@ -1,12 +1,12 @@
 //! The `surtr` command.
 
-use std::process::ExitCode;
+use std::{process::ExitCode, thread, time::Duration};
 
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 use surtr_backend::{Provider, mock::MockProvider};
 use surtr_backend_native::NativeProvider;
-use surtr_model::{Capabilities, SystemInfo};
+use surtr_model::{Capabilities, SensorDescriptor, SystemInfo, Timestamp};
 
 mod render;
 
@@ -32,6 +32,28 @@ enum Command {
     Info,
     /// Show what Surtr can and cannot read on this machine.
     Caps,
+    /// Read every sensor once and show the values.
+    Sensors {
+        /// Milliseconds between the priming read and the reported one; rate
+        /// sensors such as CPU load need two samples.
+        #[arg(long, default_value_t = 1000)]
+        interval: u64,
+    },
+}
+
+/// One sensor with its latest value; `value` is absent if it couldn't be read.
+#[derive(Serialize)]
+pub struct SensorValue<'a> {
+    #[serde(flatten)]
+    descriptor: &'a SensorDescriptor,
+    value: Option<f64>,
+    at: Option<Timestamp>,
+}
+
+#[derive(Serialize)]
+struct SensorsOutput<'a> {
+    provider: &'a str,
+    sensors: &'a [SensorValue<'a>],
 }
 
 #[derive(Serialize)]
@@ -94,6 +116,31 @@ fn run(cli: &Cli, provider: &dyn Provider) -> Result<String, Box<dyn std::error:
                 })?
             } else {
                 render::caps(id, &capabilities)
+            }
+        }
+        Command::Sensors { interval } => {
+            let descriptors = provider.sensors()?;
+            provider.read_sensors()?;
+            thread::sleep(Duration::from_millis(*interval));
+            let readings = provider.read_sensors()?;
+            let sensors: Vec<SensorValue> = descriptors
+                .iter()
+                .map(|descriptor| {
+                    let r = readings.iter().find(|r| r.id == descriptor.id);
+                    SensorValue {
+                        descriptor,
+                        value: r.map(|r| r.value),
+                        at: r.map(|r| r.at),
+                    }
+                })
+                .collect();
+            if cli.json {
+                json(&SensorsOutput {
+                    provider: id,
+                    sensors: &sensors,
+                })?
+            } else {
+                render::sensors(id, &sensors)
             }
         }
     })

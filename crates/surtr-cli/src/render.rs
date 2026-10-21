@@ -3,7 +3,11 @@
 
 use std::fmt::Write;
 
-use surtr_model::{Arch, Capabilities, CpuVendor, Feature, Field, GpuVendor, Support, SystemInfo};
+use surtr_model::{
+    Arch, Capabilities, CpuVendor, Feature, Field, GpuVendor, Support, SystemInfo, Unit,
+};
+
+use crate::SensorValue;
 
 const MISSING: &str = "not available";
 
@@ -157,10 +161,90 @@ pub fn caps(provider: &str, capabilities: &Capabilities) -> String {
     out
 }
 
+fn sensor_value(unit: Unit, v: f64) -> String {
+    match unit {
+        Unit::Celsius => format!("{v:.1} °C"),
+        Unit::Watt => format!("{v:.1} W"),
+        Unit::Volt => format!("{v:.3} V"),
+        Unit::Ampere => format!("{v:.2} A"),
+        Unit::Megahertz => format!("{v:.0} MHz"),
+        Unit::Percent => format!("{v:.1} %"),
+        Unit::Rpm => format!("{v:.0} RPM"),
+        Unit::Byte => format!("{:.1} GiB", v / (1024.0 * 1024.0 * 1024.0)),
+        Unit::Joule => format!("{v:.1} J"),
+        _ => format!("{v}"),
+    }
+}
+
+/// The `surtr sensors` report, grouped by device in provider order.
+pub fn sensors(provider: &str, sensors: &[SensorValue]) -> String {
+    let mut out = String::new();
+    if sensors.is_empty() {
+        out.push_str("No sensors available on this machine yet.\n");
+    }
+    let mut device: Option<&str> = None;
+    for s in sensors {
+        let d = s.descriptor.device.as_str();
+        if device != Some(d) {
+            if device.is_some() {
+                out.push('\n');
+            }
+            let _ = writeln!(out, "{d}");
+            device = Some(d);
+        }
+        let value = s.value.map_or_else(
+            || MISSING.to_owned(),
+            |v| sensor_value(s.descriptor.unit, v),
+        );
+        let _ = writeln!(out, "  {:<32}{value:>14}", s.descriptor.label);
+    }
+    let _ = writeln!(
+        out,
+        "\nProvider: {provider}. Run with --json to see where each value came from."
+    );
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use surtr_backend::{Provider, mock::MockProvider};
+
+    #[test]
+    fn sensors_grouped_by_device() {
+        let mock = MockProvider::desktop();
+        let descriptors = mock.sensors().unwrap();
+        let readings = mock.read_sensors().unwrap();
+        let values: Vec<SensorValue> = descriptors
+            .iter()
+            .map(|descriptor| SensorValue {
+                descriptor,
+                value: readings
+                    .iter()
+                    .find(|r| r.id == descriptor.id)
+                    .map(|r| r.value)
+                    .filter(|_| descriptor.id.0 != "gpu0/fan"),
+                at: None,
+            })
+            .collect();
+        let out = sensors("mock", &values);
+        assert!(out.starts_with("cpu0\n  Package temperature"), "{out}");
+        assert!(out.contains("\n\ngpu0\n"), "{out}");
+        // First mock step: every sine starts at its base value.
+        let line = |label: &str, value: &str| format!("  {label:<32}{value:>14}\n");
+        for expected in [
+            line("Package temperature", "55.0 °C"),
+            line("VRAM used", "6.0 GiB"),
+            line("Fan speed", "not available"),
+        ] {
+            assert!(out.contains(&expected), "missing {expected:?} in\n{out}");
+        }
+    }
+
+    #[test]
+    fn no_sensors_message() {
+        assert!(sensors("x", &[]).starts_with("No sensors available"));
+    }
 
     #[test]
     fn info_shows_values_and_missing_fields() {

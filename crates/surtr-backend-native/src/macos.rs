@@ -106,3 +106,23 @@ pub fn system_info() -> SystemInfo {
         gpus: Vec::new(),
     }
 }
+
+/// No live sensors on macOS yet (best-effort platform, plan section 3).
+#[derive(Debug)]
+pub struct State;
+
+impl State {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn capabilities(&self, _caps: &mut surtr_model::Capabilities) {}
+
+    pub fn sensors(&self) -> Vec<surtr_model::SensorDescriptor> {
+        Vec::new()
+    }
+
+    pub fn read(&self) -> Vec<surtr_model::SensorReading> {
+        Vec::new()
+    }
+}

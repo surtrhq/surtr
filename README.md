@@ -4,8 +4,8 @@ Surtr is an open-source, cross-platform hardware inspection, monitoring,
 stress-testing and tuning tool for gamers, overclockers, AI workstation owners
 and anyone who wants to know their PC is healthy. It is written in Rust.
 
-**Status: early development (milestone M1, driverless inspection).** Only
-basic OS, CPU and memory information works so far. See [the plan](docs/PLAN.md) for goals, architecture and
+**Status: early development (milestone M2, sensors).** OS, CPU and memory
+information and basic CPU and memory sensors work so far. See [the plan](docs/PLAN.md) for goals, architecture and
 milestones, and [the mockups](docs/mockups/README.md) for the intended UI.
 
 ## Layout
@@ -14,8 +14,8 @@ milestones, and [the mockups](docs/mockups/README.md) for the intended UI.
 |---|---|
 | [`surtr-model`](crates/surtr-model) | Plain typed data (hardware, sensors, capabilities). Every value is optional and tagged with its source. No I/O. |
 | [`surtr-backend`](crates/surtr-backend) | The `Provider` trait every hardware backend implements, plus a deterministic mock provider (feature `mock`). |
-| [`surtr-backend-native`](crates/surtr-backend-native) | Driverless OS backends (Windows, Linux, macOS): OS, CPU and memory information. |
-| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `surtr info`, `surtr caps`, `--json`, `--mock`. |
+| [`surtr-backend-native`](crates/surtr-backend-native) | Driverless OS backends (Windows, Linux, macOS): OS, CPU and memory information; CPU load, clocks and memory use on Windows and Linux, plus `hwmon` sensors on Linux. |
+| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `surtr info`, `surtr caps`, `surtr sensors`, `--json`, `--mock`. |
 
 ## Building
 

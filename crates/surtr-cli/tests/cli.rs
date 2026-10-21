@@ -74,3 +74,27 @@ fn native_info_json() {
         "{v:#}"
     );
 }
+
+#[test]
+fn mock_sensors_json() {
+    let v = json(&["sensors", "--mock", "--json", "--interval", "0"]);
+    let sensors = v["sensors"].as_array().unwrap();
+    let temp = sensors
+        .iter()
+        .find(|s| s["id"] == "cpu0/package/temp")
+        .expect("package temperature");
+    assert_eq!(temp["unit"], "celsius");
+    assert!(temp["value"].is_f64());
+}
+
+// On Windows and Linux the total CPU load must be readable without a driver.
+#[test]
+fn native_sensors_json() {
+    let v = json(&["sensors", "--json", "--interval", "300"]);
+    let sensors = v["sensors"].as_array().unwrap();
+    if cfg!(any(windows, target_os = "linux")) {
+        let load = sensors.iter().find(|s| s["id"] == "cpu/load");
+        let load = load.expect("cpu/load missing")["value"].as_f64();
+        assert!(load.is_some_and(|l| (0.0..=100.0).contains(&l)), "{v:#}");
+    }
+}

@@ -1,7 +1,7 @@
 //! Pure parsing helpers, compiled on every platform so their tests run in CI
 //! everywhere.
 
-use surtr_model::{Arch, CpuVendor};
+use surtr_model::{Arch, CpuVendor, SensorKind, Unit};
 
 /// `(name, version)` from an os-release file: `PRETTY_NAME` (or `NAME`) and
 /// `VERSION_ID`.
@@ -20,10 +20,12 @@ pub fn os_release(text: &str) -> (Option<String>, Option<String>) {
     )
 }
 
-/// `MemTotal` from `/proc/meminfo`, in bytes.
-pub fn meminfo_total_bytes(text: &str) -> Option<u64> {
-    let line = text.lines().find(|l| l.starts_with("MemTotal:"))?;
-    let mut parts = line["MemTotal:".len()..].split_whitespace();
+/// A `/proc/meminfo` value such as `MemTotal`, in bytes.
+pub fn meminfo_bytes(text: &str, key: &str) -> Option<u64> {
+    let line = text
+        .lines()
+        .find(|l| l.split_once(':').is_some_and(|(k, _)| k == key))?;
+    let mut parts = line[key.len() + 1..].split_whitespace();
     let value: u64 = parts.next()?.parse().ok()?;
     match parts.next() {
         Some("kB") => value.checked_mul(1024),
@@ -152,6 +154,130 @@ fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
+/// Busy and total time of one CPU line in `/proc/stat`, in clock ticks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CpuTimes {
+    /// Time not idle.
+    pub busy: u64,
+    /// All time.
+    pub total: u64,
+}
+
+/// `(cpu number, times)` for each `cpu` line of `/proc/stat`; `None` is the
+/// aggregate line.
+pub fn proc_stat(text: &str) -> Vec<(Option<u32>, CpuTimes)> {
+    text.lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let rest = parts.next()?.strip_prefix("cpu")?;
+            let cpu = if rest.is_empty() {
+                None
+            } else {
+                Some(rest.parse().ok()?)
+            };
+            // user nice system idle iowait irq softirq steal (guest time is
+            // already counted in user and nice).
+            let v: Vec<u64> = parts.take(8).map(|p| p.parse().unwrap_or(0)).collect();
+            if v.len() < 4 {
+                return None;
+            }
+            let total: u64 = v.iter().sum();
+            let idle = v[3] + v.get(4).copied().unwrap_or(0);
+            Some((
+                cpu,
+                CpuTimes {
+                    busy: total.saturating_sub(idle),
+                    total,
+                },
+            ))
+        })
+        .collect()
+}
+
+/// Load in percent between two samples, or `None` if no time passed.
+pub fn load_percent(prev: CpuTimes, cur: CpuTimes) -> Option<f64> {
+    let total = cur.total.checked_sub(prev.total).filter(|&t| t > 0)?;
+    let busy = cur.busy.saturating_sub(prev.busy).min(total);
+    Some(busy as f64 * 100.0 / total as f64)
+}
+
+/// A hwmon value file such as `temp1_input`: what it measures, its unit, the
+/// divisor from the file's integer to that unit, its type prefix and channel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HwmonChannel {
+    /// What it measures.
+    pub kind: SensorKind,
+    /// Unit after scaling.
+    pub unit: Unit,
+    /// Divides the raw integer into `unit` (for example 1000 for milli-units).
+    pub divisor: f64,
+    /// `temp`, `in`, `fan`, `power` or `curr`.
+    pub prefix: &'static str,
+    /// Channel number from the file name.
+    pub channel: u32,
+}
+
+/// Parses a hwmon file name; only `*_input` files (and `power*_average`) count.
+pub fn hwmon_channel(file: &str) -> Option<HwmonChannel> {
+    const TYPES: [(&str, SensorKind, Unit, f64); 5] = [
+        ("temp", SensorKind::Temperature, Unit::Celsius, 1e3),
+        ("in", SensorKind::Voltage, Unit::Volt, 1e3),
+        ("fan", SensorKind::Fan, Unit::Rpm, 1.0),
+        ("power", SensorKind::Power, Unit::Watt, 1e6),
+        ("curr", SensorKind::Current, Unit::Ampere, 1e3),
+    ];
+    let (name, suffix) = file.split_once('_')?;
+    for (prefix, kind, unit, divisor) in TYPES {
+        let Some(channel) = name.strip_prefix(prefix) else {
+            continue;
+        };
+        let Ok(channel) = channel.parse() else {
+            continue;
+        };
+        let wanted = suffix == "input" || (prefix == "power" && suffix == "average");
+        return wanted.then_some(HwmonChannel {
+            kind,
+            unit,
+            divisor,
+            prefix,
+            channel,
+        });
+    }
+    None
+}
+
+/// A Windows PDH "Processor Information" instance name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PdhInstance {
+    /// `_Total`: the whole system.
+    Total,
+    /// `G,_Total`: one processor group.
+    GroupTotal,
+    /// `G,N`: logical processor `N` in group `G`.
+    Thread {
+        /// Processor group.
+        group: u16,
+        /// Number inside the group.
+        index: u32,
+    },
+}
+
+/// Parses a PDH processor instance name such as `"0,5"` or `"_Total"`.
+pub fn pdh_instance(name: &str) -> Option<PdhInstance> {
+    if name == "_Total" {
+        return Some(PdhInstance::Total);
+    }
+    let (group, rest) = name.split_once(',')?;
+    let group = group.trim().parse().ok()?;
+    if rest == "_Total" {
+        return Some(PdhInstance::GroupTotal);
+    }
+    Some(PdhInstance::Thread {
+        group,
+        index: rest.trim().parse().ok()?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,8 +299,8 @@ mod tests {
     #[test]
     fn meminfo_total_in_bytes() {
         let text = "MemTotal:       16314748 kB\nMemFree:         1234 kB\n";
-        assert_eq!(meminfo_total_bytes(text), Some(16_314_748 * 1024));
-        assert_eq!(meminfo_total_bytes("MemFree: 1 kB"), None);
+        assert_eq!(meminfo_bytes(text, "MemTotal"), Some(16_314_748 * 1024));
+        assert_eq!(meminfo_bytes("MemFree: 1 kB", "MemTotal"), None);
     }
 
     #[test]
@@ -262,5 +388,72 @@ mod tests {
     fn topology_without_package_records() {
         let cores = vec![vec![(0, 0b11)], vec![(0, 0b1100)]];
         assert_eq!(group_topology(&[], &cores), vec![(2, 4)]);
+    }
+
+    #[test]
+    fn proc_stat_lines() {
+        let text = "cpu  100 0 50 800 50 0 0 0 0 0\ncpu0 60 0 20 400 20 0 0 0 0 0\nintr 1 2 3\n";
+        let stats = proc_stat(text);
+        assert_eq!(stats.len(), 2);
+        assert_eq!(
+            stats[0],
+            (
+                None,
+                CpuTimes {
+                    busy: 150,
+                    total: 1000
+                }
+            )
+        );
+        assert_eq!(stats[1].0, Some(0));
+    }
+
+    #[test]
+    fn load_between_samples() {
+        let a = CpuTimes {
+            busy: 100,
+            total: 1000,
+        };
+        let b = CpuTimes {
+            busy: 150,
+            total: 1100,
+        };
+        assert_eq!(load_percent(a, b), Some(50.0));
+        assert_eq!(load_percent(a, a), None);
+        assert_eq!(load_percent(b, a), None);
+    }
+
+    #[test]
+    fn meminfo_values() {
+        let text = "MemTotal:       16314748 kB\nMemAvailable:    8000000 kB\n";
+        assert_eq!(meminfo_bytes(text, "MemAvailable"), Some(8_000_000 * 1024));
+        assert_eq!(meminfo_bytes(text, "Mem"), None);
+    }
+
+    #[test]
+    fn hwmon_file_names() {
+        let t = hwmon_channel("temp1_input").unwrap();
+        assert_eq!(
+            (t.kind, t.unit, t.channel),
+            (SensorKind::Temperature, Unit::Celsius, 1)
+        );
+        assert_eq!(hwmon_channel("in0_input").unwrap().unit, Unit::Volt);
+        assert_eq!(hwmon_channel("power1_average").unwrap().unit, Unit::Watt);
+        assert_eq!(hwmon_channel("fan2_input").unwrap().channel, 2);
+        assert_eq!(hwmon_channel("temp1_label"), None);
+        assert_eq!(hwmon_channel("temp1_max"), None);
+        assert_eq!(hwmon_channel("intrusion0_alarm"), None);
+        assert_eq!(hwmon_channel("name"), None);
+    }
+
+    #[test]
+    fn pdh_instance_names() {
+        assert_eq!(pdh_instance("_Total"), Some(PdhInstance::Total));
+        assert_eq!(pdh_instance("0,_Total"), Some(PdhInstance::GroupTotal));
+        assert_eq!(
+            pdh_instance("1,5"),
+            Some(PdhInstance::Thread { group: 1, index: 5 })
+        );
+        assert_eq!(pdh_instance("bogus"), None);
     }
 }
