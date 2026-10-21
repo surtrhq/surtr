@@ -13,8 +13,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use surtr_model::{
-    Arch, Capabilities, CpuInfo, CpuVendor, Feature, GpuInfo, GpuVendor, MemoryInfo, OsInfo,
-    SensorDescriptor, SensorId, SensorKind, SensorReading, Source, Support, SystemInfo, Timestamp,
+    Arch, Capabilities, CpuInfo, CpuVendor, Feature, GpuInfo, GpuProcess, GpuProcessKind,
+    GpuVendor, MemoryInfo, OsInfo, SensorDescriptor, SensorId, SensorKind, SensorReading, Source,
+    Support, SystemInfo, ThrottleReason, ThrottleState, Timestamp,
 };
 
 use crate::{Provider, ProviderError};
@@ -56,6 +57,12 @@ pub struct MockFixture {
     pub sensors: Vec<MockSensor>,
     /// Returned by [`Provider::capabilities`].
     pub capabilities: Capabilities,
+    /// Returned by [`Provider::gpu_processes`].
+    #[serde(default)]
+    pub processes: Vec<GpuProcess>,
+    /// Returned by [`Provider::throttle_reasons`].
+    #[serde(default)]
+    pub throttle: Vec<ThrottleState>,
 }
 
 /// A deterministic fake provider. See the [module docs](self).
@@ -198,6 +205,8 @@ impl MockProvider {
             Feature::MemoryInfo,
             Feature::GpuIdentity,
             Feature::GpuSensors,
+            Feature::GpuProcesses,
+            Feature::GpuThrottleReasons,
         ] {
             capabilities.set(feature, Support::Available);
         }
@@ -209,10 +218,25 @@ impl MockProvider {
             },
         );
 
+        let processes = vec![GpuProcess {
+            device: "gpu0".to_owned(),
+            pid: 4242,
+            name: Some("mock-inference".to_owned()),
+            kind: GpuProcessKind::Compute,
+            used_memory_bytes: info.tag(4 * 1024 * 1024 * 1024),
+        }];
+        let throttle = vec![ThrottleState {
+            device: "gpu0".to_owned(),
+            reasons: vec![ThrottleReason::PowerCap],
+            source: info.clone(),
+        }];
+
         Self::new(MockFixture {
             system,
             sensors,
             capabilities,
+            processes,
+            throttle,
         })
     }
 
@@ -281,6 +305,14 @@ impl Provider for MockProvider {
                 at,
             })
             .collect())
+    }
+
+    fn gpu_processes(&self) -> Result<Vec<GpuProcess>, ProviderError> {
+        Ok(self.fixture.processes.clone())
+    }
+
+    fn throttle_reasons(&self) -> Result<Vec<ThrottleState>, ProviderError> {
+        Ok(self.fixture.throttle.clone())
     }
 }
 

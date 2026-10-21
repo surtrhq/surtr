@@ -3,11 +3,11 @@
 
 use std::fmt::Write;
 
+use surtr_core::Sample;
 use surtr_model::{
-    Arch, Capabilities, CpuVendor, Feature, Field, GpuVendor, Support, SystemInfo, Unit,
+    Arch, Capabilities, CpuVendor, Feature, Field, GpuProcess, GpuProcessKind, GpuVendor, Support,
+    SystemInfo, ThrottleReason, ThrottleState, Unit,
 };
-
-use crate::SensorValue;
 
 const MISSING: &str = "not available";
 
@@ -106,7 +106,7 @@ pub fn info(provider: &str, system: &SystemInfo) -> String {
 
     let _ = writeln!(
         out,
-        "\nProvider: {provider}. Run with --json to see where each value came from."
+        "\nProviders: {provider}. Run with --json to see where each value came from."
     );
     out
 }
@@ -157,7 +157,7 @@ pub fn caps(provider: &str, capabilities: &Capabilities) -> String {
             support_label(capabilities.support(feature))
         );
     }
-    let _ = writeln!(out, "\nProvider: {provider}.");
+    let _ = writeln!(out, "\nProviders: {provider}.");
     out
 }
 
@@ -177,7 +177,7 @@ fn sensor_value(unit: Unit, v: f64) -> String {
 }
 
 /// The `surtr sensors` report, grouped by device in provider order.
-pub fn sensors(provider: &str, sensors: &[SensorValue]) -> String {
+pub fn sensors(provider: &str, sensors: &[Sample]) -> String {
     let mut out = String::new();
     if sensors.is_empty() {
         out.push_str("No sensors available on this machine yet.\n");
@@ -200,8 +200,74 @@ pub fn sensors(provider: &str, sensors: &[SensorValue]) -> String {
     }
     let _ = writeln!(
         out,
-        "\nProvider: {provider}. Run with --json to see where each value came from."
+        "\nProviders: {provider}. Run with --json to see where each value came from."
     );
+    out
+}
+
+/// The `surtr gpu procs` report.
+pub fn gpu_processes(processes: &[GpuProcess]) -> String {
+    if processes.is_empty() {
+        return "No processes are using a GPU.\n".to_owned();
+    }
+    let mut out = String::new();
+    let mut device: Option<&str> = None;
+    for p in processes {
+        if device != Some(p.device.as_str()) {
+            if device.is_some() {
+                out.push('\n');
+            }
+            let _ = writeln!(out, "{}", p.device);
+            let _ = writeln!(out, "  {:<10}{:<11}{:>12}  Name", "PID", "Type", "Memory");
+            device = Some(p.device.as_str());
+        }
+        let kind = match p.kind {
+            GpuProcessKind::Compute => "compute",
+            GpuProcessKind::Graphics => "graphics",
+        };
+        let memory = p.used_memory_bytes.as_ref().map_or_else(
+            || "n/a".to_owned(),
+            |m| sensor_value(Unit::Byte, m.value as f64),
+        );
+        let name = p.name.as_deref().unwrap_or("?");
+        let _ = writeln!(out, "  {:<10}{kind:<11}{memory:>12}  {name}", p.pid);
+    }
+    out
+}
+
+fn throttle_label(reason: ThrottleReason) -> &'static str {
+    match reason {
+        ThrottleReason::Idle => "idle",
+        ThrottleReason::ApplicationClocks => "application clock setting",
+        ThrottleReason::PowerCap => "power limit",
+        ThrottleReason::HardwareSlowdown => "hardware slowdown",
+        ThrottleReason::SyncBoost => "sync boost",
+        ThrottleReason::SoftwareThermal => "thermal limit (driver)",
+        ThrottleReason::HardwareThermal => "thermal limit (hardware)",
+        ThrottleReason::HardwarePowerBrake => "power brake",
+        ThrottleReason::DisplayClocks => "display clock setting",
+        _ => "other",
+    }
+}
+
+/// The `surtr gpu throttle` report.
+pub fn throttle(states: &[ThrottleState]) -> String {
+    if states.is_empty() {
+        return "No GPU reports throttle reasons.\n".to_owned();
+    }
+    let mut out = String::new();
+    for s in states {
+        let reasons = if s.reasons.is_empty() {
+            "none (running unrestricted)".to_owned()
+        } else {
+            s.reasons
+                .iter()
+                .map(|&r| throttle_label(r))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let _ = writeln!(out, "{:<12}{reasons}", s.device);
+    }
     out
 }
 
@@ -215,10 +281,10 @@ mod tests {
         let mock = MockProvider::desktop();
         let descriptors = mock.sensors().unwrap();
         let readings = mock.read_sensors().unwrap();
-        let values: Vec<SensorValue> = descriptors
+        let values: Vec<Sample> = descriptors
             .iter()
-            .map(|descriptor| SensorValue {
-                descriptor,
+            .map(|descriptor| Sample {
+                descriptor: descriptor.clone(),
                 value: readings
                     .iter()
                     .find(|r| r.id == descriptor.id)
@@ -247,6 +313,34 @@ mod tests {
     }
 
     #[test]
+    fn gpu_process_table() {
+        let mock = MockProvider::desktop();
+        let mut procs = mock.gpu_processes().unwrap();
+        let out = gpu_processes(&procs);
+        assert!(out.starts_with("gpu0\n  PID"), "{out}");
+        let row = format!(
+            "  {:<10}{:<11}{:>12}  {}\n",
+            4242, "compute", "4.0 GiB", "mock-inference"
+        );
+        assert!(out.contains(&row), "{out}");
+        procs[0].used_memory_bytes = None;
+        procs[0].name = None;
+        assert!(gpu_processes(&procs).contains("n/a  ?"));
+        assert_eq!(gpu_processes(&[]), "No processes are using a GPU.\n");
+    }
+
+    #[test]
+    fn throttle_lines() {
+        let mut states = MockProvider::desktop().throttle_reasons().unwrap();
+        assert_eq!(throttle(&states), "gpu0        power limit\n");
+        states[0].reasons.clear();
+        assert_eq!(
+            throttle(&states),
+            "gpu0        none (running unrestricted)\n"
+        );
+    }
+
+    #[test]
     fn info_shows_values_and_missing_fields() {
         let mock = MockProvider::desktop();
         let mut system = mock.system_info().unwrap();
@@ -259,7 +353,7 @@ mod tests {
         assert!(out.contains("  Total         32.0 GiB\n"));
         assert!(out.contains("GPU 0"));
         assert!(
-            out.ends_with("Provider: mock. Run with --json to see where each value came from.\n")
+            out.ends_with("Providers: mock. Run with --json to see where each value came from.\n")
         );
     }
 

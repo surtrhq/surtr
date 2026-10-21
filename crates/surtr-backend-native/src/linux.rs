@@ -102,6 +102,13 @@ fn cpus() -> Vec<CpuInfo> {
         .collect()
 }
 
+pub fn process_name(pid: u32) -> Option<String> {
+    // `comm` is the executable name, truncated by the kernel to 15 bytes.
+    read(format!("/proc/{pid}/comm"))
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+}
+
 fn online_cpus() -> Vec<u32> {
     read(format!("{CPU_DIR}/online"))
         .map(|t| parse::cpu_list(&t))

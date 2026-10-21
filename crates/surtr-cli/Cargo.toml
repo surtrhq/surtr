@@ -15,6 +15,8 @@ path = "src/main.rs"
 surtr-model.workspace = true
 surtr-backend = { workspace = true, features = ["mock"] }
 surtr-backend-native.workspace = true
+surtr-backend-nvidia.workspace = true
+surtr-core.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true

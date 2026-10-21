@@ -15,7 +15,9 @@ milestones, and [the mockups](docs/mockups/README.md) for the intended UI.
 | [`surtr-model`](crates/surtr-model) | Plain typed data (hardware, sensors, capabilities). Every value is optional and tagged with its source. No I/O. |
 | [`surtr-backend`](crates/surtr-backend) | The `Provider` trait every hardware backend implements, plus a deterministic mock provider (feature `mock`). |
 | [`surtr-backend-native`](crates/surtr-backend-native) | Driverless OS backends (Windows, Linux, macOS): OS, CPU and memory information; CPU load, clocks and memory use on Windows and Linux, plus `hwmon` sensors on Linux. |
-| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `surtr info`, `surtr caps`, `surtr sensors`, `--json`, `--mock`. |
+| [`surtr-backend-nvidia`](crates/surtr-backend-nvidia) | NVIDIA GPUs through NVML, loaded at run time from the driver install (never shipped; see its NOTICE): identity, sensors, throttle reasons, per-process memory. |
+| [`surtr-core`](crates/surtr-core) | The `Hub`, which combines the OS backend and GPU backends into one view. |
+| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, with `--json` and `--mock`. |
 
 ## Building
 

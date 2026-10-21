@@ -1,0 +1,19 @@
+[package]
+name = "surtr-core"
+description = "Surtr's core: combines hardware providers into one view"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+surtr-model.workspace = true
+surtr-backend.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+surtr-backend = { workspace = true, features = ["mock"] }
+
+[lints]
+workspace = true

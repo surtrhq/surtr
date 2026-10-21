@@ -12,7 +12,7 @@ use surtr_model::{
     SensorKind, SensorReading, Source, Support, SystemInfo, Timestamp,
 };
 use windows_sys::Win32::{
-    Foundation::ERROR_SUCCESS,
+    Foundation::{CloseHandle, ERROR_SUCCESS},
     System::{
         Performance::{
             PDH_CSTATUS_NEW_DATA, PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE_ITEM_W,
@@ -28,7 +28,8 @@ use windows_sys::Win32::{
         },
         Threading::{
             GetActiveProcessorCount, GetActiveProcessorGroupCount, GetCurrentProcess,
-            IsWow64Process2,
+            IsWow64Process2, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+            QueryFullProcessImageNameW,
         },
     },
 };
@@ -130,6 +131,31 @@ fn native_arch() -> Option<Arch> {
         IMAGE_FILE_MACHINE_I386 => Arch::Other("x86".to_owned()),
         other => Arch::Other(format!("machine 0x{other:04x}")),
     })
+}
+
+/// The executable file name of process `pid`. Needs only limited query
+/// rights, so it works for most processes of the current user.
+#[allow(unsafe_code)]
+pub fn process_name(pid: u32) -> Option<String> {
+    // SAFETY: plain call; a null handle means failure.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return None;
+    }
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    // SAFETY: `handle` is open; `buf` holds `len` UTF-16 units.
+    let ok = unsafe {
+        QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len)
+    };
+    // SAFETY: `handle` is open and closed exactly once.
+    unsafe { CloseHandle(handle) };
+    if ok == 0 {
+        return None;
+    }
+    let path = String::from_utf16_lossy(&buf[..len as usize]);
+    let name = path.rsplit(['\\', '/']).next()?.to_owned();
+    (!name.is_empty()).then_some(name)
 }
 
 /// `(total, available)` physical memory visible to the OS, in bytes.

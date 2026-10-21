@@ -9,7 +9,9 @@
 
 use std::{error::Error, fmt, io};
 
-use surtr_model::{Capabilities, SensorDescriptor, SensorReading, SystemInfo};
+use surtr_model::{
+    Capabilities, GpuProcess, SensorDescriptor, SensorReading, SystemInfo, ThrottleState,
+};
 
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;
@@ -38,6 +40,18 @@ pub trait Provider: Send + Sync {
     /// Reads all sensors once. Sensors that can't be read this time are left
     /// out rather than reported as zero.
     fn read_sensors(&self) -> Result<Vec<SensorReading>, ProviderError>;
+
+    /// Processes using this provider's GPUs. Providers without GPUs keep the
+    /// default (none). Process names may be left for the caller to fill in.
+    fn gpu_processes(&self) -> Result<Vec<GpuProcess>, ProviderError> {
+        Ok(Vec::new())
+    }
+
+    /// Why each of this provider's devices is below its potential clock.
+    /// Providers that can't tell keep the default (no devices).
+    fn throttle_reasons(&self) -> Result<Vec<ThrottleState>, ProviderError> {
+        Ok(Vec::new())
+    }
 }
 
 /// Why a provider call failed.

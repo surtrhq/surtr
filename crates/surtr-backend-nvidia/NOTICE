@@ -1,0 +1,13 @@
+surtr-backend-nvidia talks to the NVIDIA Management Library (NVML).
+
+NVML is NVIDIA's library. It is installed with the NVIDIA display driver
+(nvml.dll on Windows, libnvidia-ml.so.1 on Linux) and is loaded from the
+user's system at run time. Surtr does not include, redistribute or link
+against any NVIDIA binary or header.
+
+The function and type declarations in src/ffi.rs were written by hand from
+NVIDIA's public NVML API documentation. They are part of Surtr and licensed
+like the rest of the project (MIT OR Apache-2.0).
+
+NVIDIA and NVML are trademarks of NVIDIA Corporation. Surtr is not affiliated
+with or endorsed by NVIDIA.

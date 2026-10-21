@@ -11,11 +11,13 @@
 #![forbid(unsafe_code)]
 
 mod capability;
+mod gpu;
 mod sensor;
 mod source;
 mod system;
 
 pub use capability::{Capabilities, Capability, Feature, Support};
+pub use gpu::{GpuProcess, GpuProcessKind, ThrottleReason, ThrottleState};
 pub use sensor::{SensorDescriptor, SensorId, SensorKind, SensorReading, Timestamp, Unit};
 pub use source::{Field, Source, Sourced};
 pub use system::{

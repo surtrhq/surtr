@@ -1,0 +1,16 @@
+[package]
+name = "surtr-backend-nvidia"
+description = "NVIDIA GPU backend for Surtr through NVML, loaded at run time"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+surtr-model.workspace = true
+surtr-backend.workspace = true
+libloading = "0.9"
+
+[lints]
+workspace = true

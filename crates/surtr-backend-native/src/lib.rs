@@ -39,6 +39,10 @@ mod platform {
         SystemInfo::default()
     }
 
+    pub fn process_name(_pid: u32) -> Option<String> {
+        None
+    }
+
     #[derive(Debug)]
     pub struct State;
 
@@ -80,6 +84,12 @@ fn reading(id: SensorId, value: f64, at: Timestamp) -> SensorReading {
     SensorReading { id, value, at }
 }
 
+/// The executable name (without its path) of process `pid`, if the OS lets
+/// this user see it.
+pub fn process_name(pid: u32) -> Option<String> {
+    platform::process_name(pid)
+}
+
 /// The driverless provider for the OS Surtr was built for.
 ///
 /// Rate sensors such as CPU load compare two samples, so the first
@@ -112,7 +122,15 @@ impl Provider for NativeProvider {
 
     fn capabilities(&self) -> Capabilities {
         let mut caps = Capabilities::default();
-        for &feature in Feature::ALL {
+        // GPU features belong to the GPU providers, not to the OS backend.
+        const GPU: [Feature; 5] = [
+            Feature::GpuIdentity,
+            Feature::GpuSensors,
+            Feature::GpuProcesses,
+            Feature::GpuThrottleReasons,
+            Feature::GpuTuning,
+        ];
+        for &feature in Feature::ALL.iter().filter(|f| !GPU.contains(f)) {
             caps.set(
                 feature,
                 Support::Unsupported {
@@ -164,8 +182,18 @@ mod tests {
         assert_eq!(info.os.name.unwrap().source.provider, id);
     }
 
+    #[test]
+    fn names_own_process() {
+        let name = process_name(std::process::id()).expect("own process name");
+        // Linux and macOS truncate names (Linux to 15 bytes).
+        assert!(name.starts_with("surtr_backend_n"), "{name}");
+        assert!(!name.contains(['/', '\\']), "{name}");
+    }
+
     // Every reading must belong to a declared sensor, and on Windows and Linux
-    // the total CPU load must show up once two samples exist.
+    // the total CPU load must show up once two samples exist. The OS may mark
+    // a single sample invalid (it is then left out), so a few reads are
+    // allowed before the load must appear.
     #[test]
     fn readings_match_declared_sensors() {
         let provider = NativeProvider::new().unwrap();
@@ -175,16 +203,24 @@ mod tests {
             .into_iter()
             .map(|d| d.id)
             .collect();
-        provider.read_sensors().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let readings = provider.read_sensors().unwrap();
-        for r in &readings {
-            assert!(declared.contains(&r.id), "undeclared sensor {:?}", r.id);
-            assert!(r.value.is_finite(), "{:?} is {}", r.id, r.value);
+        let mut load = None;
+        for _ in 0..3 {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let readings = provider.read_sensors().unwrap();
+            for r in &readings {
+                assert!(declared.contains(&r.id), "undeclared sensor {:?}", r.id);
+                assert!(r.value.is_finite(), "{:?} is {}", r.id, r.value);
+            }
+            load = readings
+                .iter()
+                .find(|r| r.id.0 == "cpu/load")
+                .map(|r| r.value);
+            if load.is_some() {
+                break;
+            }
         }
         if cfg!(any(windows, target_os = "linux")) {
-            let load = readings.iter().find(|r| r.id.0 == "cpu/load");
-            let load = load.expect("no total CPU load").value;
+            let load = load.expect("no total CPU load in 3 reads");
             assert!((0.0..=100.0).contains(&load), "load {load}");
         }
     }

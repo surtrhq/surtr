@@ -3,10 +3,12 @@
 use std::{process::ExitCode, thread, time::Duration};
 
 use clap::{Parser, Subcommand};
-use serde::Serialize;
-use surtr_backend::{Provider, mock::MockProvider};
-use surtr_backend_native::NativeProvider;
-use surtr_model::{Capabilities, SensorDescriptor, SystemInfo, Timestamp};
+use serde_json::json;
+use surtr_backend::{ProviderError, mock::MockProvider};
+use surtr_backend_native::{NativeProvider, process_name};
+use surtr_backend_nvidia::NvidiaProvider;
+use surtr_core::Hub;
+use surtr_model::Feature;
 
 mod render;
 
@@ -28,7 +30,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Show OS, CPU and memory information (the default).
+    /// Show OS, CPU, memory and GPU information (the default).
     Info,
     /// Show what Surtr can and cannot read on this machine.
     Caps,
@@ -39,49 +41,60 @@ enum Command {
         #[arg(long, default_value_t = 1000)]
         interval: u64,
     },
+    /// GPU processes and throttle reasons.
+    Gpu {
+        #[command(subcommand)]
+        command: GpuCommand,
+    },
 }
 
-/// One sensor with its latest value; `value` is absent if it couldn't be read.
-#[derive(Serialize)]
-pub struct SensorValue<'a> {
-    #[serde(flatten)]
-    descriptor: &'a SensorDescriptor,
-    value: Option<f64>,
-    at: Option<Timestamp>,
+#[derive(Debug, Subcommand)]
+enum GpuCommand {
+    /// Processes using each GPU, with the GPU memory they hold.
+    Procs,
+    /// Why each GPU runs below its potential clock right now.
+    Throttle,
 }
 
-#[derive(Serialize)]
-struct SensorsOutput<'a> {
-    provider: &'a str,
-    sensors: &'a [SensorValue<'a>],
+/// Features only GPU backends provide.
+const GPU_FEATURES: [Feature; 5] = [
+    Feature::GpuIdentity,
+    Feature::GpuSensors,
+    Feature::GpuProcesses,
+    Feature::GpuThrottleReasons,
+    Feature::GpuTuning,
+];
+
+fn reason(err: ProviderError) -> String {
+    match err {
+        ProviderError::Unavailable { reason } => reason,
+        other => other.to_string(),
+    }
 }
 
-#[derive(Serialize)]
-struct InfoOutput<'a> {
-    provider: &'a str,
-    system: &'a SystemInfo,
-}
-
-#[derive(Serialize)]
-struct CapsOutput<'a> {
-    provider: &'a str,
-    capabilities: &'a Capabilities,
+/// The providers for this run: the mock alone, or the OS backend plus every
+/// GPU backend that can start here.
+fn hub(mock: bool) -> Result<Hub, String> {
+    let mut hub = Hub::new();
+    if mock {
+        hub.add(Box::new(MockProvider::desktop()));
+        return Ok(hub);
+    }
+    hub.add(Box::new(NativeProvider::new().map_err(reason)?));
+    match NvidiaProvider::new() {
+        Ok(nvidia) => hub.add(Box::new(nvidia)),
+        Err(err) => hub.add_missing(
+            &GPU_FEATURES,
+            format!("no supported GPU found ({})", reason(err)),
+        ),
+    }
+    Ok(hub)
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let provider: Box<dyn Provider> = if cli.mock {
-        Box::new(MockProvider::desktop())
-    } else {
-        match NativeProvider::new() {
-            Ok(p) => Box::new(p),
-            Err(err) => {
-                eprintln!("surtr: {err}");
-                return ExitCode::FAILURE;
-            }
-        }
-    };
-    match run(&cli, provider.as_ref()) {
+    let result = hub(cli.mock).and_then(|hub| run(&cli, &hub).map_err(|e| e.to_string()));
+    match result {
         Ok(output) => {
             print!("{output}");
             ExitCode::SUCCESS
@@ -93,59 +106,60 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: &Cli, provider: &dyn Provider) -> Result<String, Box<dyn std::error::Error>> {
-    let id = provider.id();
-    Ok(match cli.command.as_ref().unwrap_or(&Command::Info) {
+fn run(cli: &Cli, hub: &Hub) -> serde_json::Result<String> {
+    let providers = hub.provider_ids();
+    let names = providers.join(", ");
+    let out = |value: serde_json::Value, text: String| {
+        if cli.json {
+            serde_json::to_string_pretty(&value).map(|s| s + "\n")
+        } else {
+            Ok(text)
+        }
+    };
+    match cli.command.as_ref().unwrap_or(&Command::Info) {
         Command::Info => {
-            let system = provider.system_info()?;
-            if cli.json {
-                json(&InfoOutput {
-                    provider: id,
-                    system: &system,
-                })?
-            } else {
-                render::info(id, &system)
-            }
+            let system = hub.system_info();
+            out(
+                json!({ "providers": providers, "system": system }),
+                render::info(&names, &system),
+            )
         }
         Command::Caps => {
-            let capabilities = provider.capabilities();
-            if cli.json {
-                json(&CapsOutput {
-                    provider: id,
-                    capabilities: &capabilities,
-                })?
-            } else {
-                render::caps(id, &capabilities)
-            }
+            let capabilities = hub.capabilities();
+            out(
+                json!({ "providers": providers, "capabilities": capabilities }),
+                render::caps(&names, &capabilities),
+            )
         }
         Command::Sensors { interval } => {
-            let descriptors = provider.sensors()?;
-            provider.read_sensors()?;
+            hub.read();
             thread::sleep(Duration::from_millis(*interval));
-            let readings = provider.read_sensors()?;
-            let sensors: Vec<SensorValue> = descriptors
-                .iter()
-                .map(|descriptor| {
-                    let r = readings.iter().find(|r| r.id == descriptor.id);
-                    SensorValue {
-                        descriptor,
-                        value: r.map(|r| r.value),
-                        at: r.map(|r| r.at),
-                    }
-                })
-                .collect();
-            if cli.json {
-                json(&SensorsOutput {
-                    provider: id,
-                    sensors: &sensors,
-                })?
-            } else {
-                render::sensors(id, &sensors)
-            }
+            let samples = hub.read();
+            out(
+                json!({ "providers": providers, "sensors": samples }),
+                render::sensors(&names, &samples),
+            )
         }
-    })
-}
-
-fn json(value: &impl Serialize) -> serde_json::Result<String> {
-    serde_json::to_string_pretty(value).map(|s| s + "\n")
+        Command::Gpu {
+            command: GpuCommand::Procs,
+        } => {
+            let mut processes = hub.gpu_processes();
+            for p in processes.iter_mut().filter(|p| p.name.is_none()) {
+                p.name = process_name(p.pid);
+            }
+            out(
+                json!({ "providers": providers, "processes": processes }),
+                render::gpu_processes(&processes),
+            )
+        }
+        Command::Gpu {
+            command: GpuCommand::Throttle,
+        } => {
+            let throttle = hub.throttle_reasons();
+            out(
+                json!({ "providers": providers, "throttle": throttle }),
+                render::throttle(&throttle),
+            )
+        }
+    }
 }

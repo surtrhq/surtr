@@ -24,7 +24,7 @@ fn json(args: &[&str]) -> Value {
 #[test]
 fn mock_info_json() {
     let v = json(&["--mock", "--json"]);
-    assert_eq!(v["provider"], "mock");
+    assert_eq!(v["providers"][0], "mock");
     assert_eq!(
         v["system"]["cpus"][0]["brand"]["value"],
         "Mock 8-Core Processor"
@@ -88,13 +88,47 @@ fn mock_sensors_json() {
 }
 
 // On Windows and Linux the total CPU load must be readable without a driver.
+// The OS may mark a single sample invalid (Surtr then leaves it out), so a
+// few attempts are allowed; a load that never appears still fails.
 #[test]
 fn native_sensors_json() {
-    let v = json(&["sensors", "--json", "--interval", "300"]);
-    let sensors = v["sensors"].as_array().unwrap();
-    if cfg!(any(windows, target_os = "linux")) {
-        let load = sensors.iter().find(|s| s["id"] == "cpu/load");
-        let load = load.expect("cpu/load missing")["value"].as_f64();
-        assert!(load.is_some_and(|l| (0.0..=100.0).contains(&l)), "{v:#}");
+    if !cfg!(any(windows, target_os = "linux")) {
+        return;
     }
+    let mut last = Value::Null;
+    for _ in 0..3 {
+        let v = json(&["sensors", "--json", "--interval", "300"]);
+        let sensors = v["sensors"].as_array().unwrap();
+        let load = sensors.iter().find(|s| s["id"] == "cpu/load");
+        let load = load.expect("cpu/load sensor missing")["value"].as_f64();
+        if load.is_some_and(|l| (0.0..=100.0).contains(&l)) {
+            return;
+        }
+        last = v;
+    }
+    panic!("no valid total CPU load in 3 attempts: {last:#}");
+}
+
+#[test]
+fn mock_gpu_procs_and_throttle_json() {
+    let v = json(&["gpu", "procs", "--mock", "--json"]);
+    assert_eq!(v["processes"][0]["pid"], 4242);
+    assert_eq!(v["processes"][0]["kind"], "compute");
+    let v = json(&["gpu", "throttle", "--mock", "--json"]);
+    assert_eq!(v["throttle"][0]["reasons"][0], "power_cap");
+}
+
+// Both commands must work on every machine, with or without a GPU backend.
+#[test]
+fn native_gpu_commands_run() {
+    json(&["gpu", "procs", "--json"]);
+    json(&["gpu", "throttle", "--json"]);
+    let caps = json(&["caps", "--json"]);
+    let gpu = caps["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["feature"] == "gpu_identity")
+        .expect("gpu_identity is always reported");
+    assert!(gpu["support"]["status"].is_string(), "{caps:#}");
 }

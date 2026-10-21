@@ -126,3 +126,13 @@ impl State {
         Vec::new()
     }
 }
+
+#[allow(unsafe_code)]
+pub fn process_name(pid: u32) -> Option<String> {
+    let pid = libc::c_int::try_from(pid).ok()?;
+    let mut buf = [0u8; 256];
+    // SAFETY: `buf` is writable for the size passed.
+    let len = unsafe { libc::proc_name(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    let len = usize::try_from(len).ok().filter(|&n| n > 0)?;
+    Some(String::from_utf8_lossy(&buf[..len]).into_owned())
+}
