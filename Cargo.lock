@@ -227,6 +227,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "surtr-backend-amd"
+version = "0.1.0"
+dependencies = [
+ "surtr-backend",
+ "surtr-model",
+]
+
+[[package]]
 name = "surtr-backend-native"
 version = "0.1.0"
 dependencies = [
@@ -253,6 +261,7 @@ dependencies = [
  "serde",
  "serde_json",
  "surtr-backend",
+ "surtr-backend-amd",
  "surtr-backend-native",
  "surtr-backend-nvidia",
  "surtr-core",

@@ -180,6 +180,8 @@ fn scan_hwmon(root: &Path) -> Vec<HwmonSensor> {
             let name = read(dir.join("name"))?.trim().to_owned();
             Some((name, dir))
         })
+        // GPU backends own their chips (surtr-backend-amd reads amdgpu).
+        .filter(|(name, _)| name != "amdgpu")
         .collect();
     chips.sort();
 
@@ -442,10 +444,15 @@ mod tests {
         fx.chip(
             "hwmon2",
             &[
-                ("name", "amdgpu\n"),
+                ("name", "ina3221\n"),
                 ("power1_average", "45000000\n"),
                 ("power1_input", "47000000\n"),
             ],
+        );
+        // The AMD GPU backend owns this chip.
+        fx.chip(
+            "hwmon3",
+            &[("name", "amdgpu\n"), ("temp1_input", "40000\n")],
         );
 
         let sensors = scan_hwmon(&fx.0);
@@ -453,7 +460,7 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "hwmon/amdgpu/power1",
+                "hwmon/ina3221/power1",
                 "hwmon/cpu0/temp1",
                 "hwmon/nct6798/fan1",
                 "hwmon/nct6798/in0",

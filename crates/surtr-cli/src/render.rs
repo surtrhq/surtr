@@ -224,6 +224,7 @@ pub fn gpu_processes(processes: &[GpuProcess]) -> String {
         let kind = match p.kind {
             GpuProcessKind::Compute => "compute",
             GpuProcessKind::Graphics => "graphics",
+            GpuProcessKind::Unknown => "-",
         };
         let memory = p.used_memory_bytes.as_ref().map_or_else(
             || "n/a".to_owned(),

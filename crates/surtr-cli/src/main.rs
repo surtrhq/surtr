@@ -4,7 +4,8 @@ use std::{process::ExitCode, thread, time::Duration};
 
 use clap::{Parser, Subcommand};
 use serde_json::json;
-use surtr_backend::{ProviderError, mock::MockProvider};
+use surtr_backend::{Provider, ProviderError, mock::MockProvider};
+use surtr_backend_amd::AmdProvider;
 use surtr_backend_native::{NativeProvider, process_name};
 use surtr_backend_nvidia::NvidiaProvider;
 use surtr_core::Hub;
@@ -81,12 +82,23 @@ fn hub(mock: bool) -> Result<Hub, String> {
         return Ok(hub);
     }
     hub.add(Box::new(NativeProvider::new().map_err(reason)?));
-    match NvidiaProvider::new() {
-        Ok(nvidia) => hub.add(Box::new(nvidia)),
-        Err(err) => hub.add_missing(
+    type Started = Result<Box<dyn Provider>, ProviderError>;
+    let gpus: [(&str, Started); 2] = [
+        ("NVIDIA", NvidiaProvider::new().map(|p| Box::new(p) as _)),
+        ("AMD", AmdProvider::new().map(|p| Box::new(p) as _)),
+    ];
+    let mut why_not = Vec::new();
+    for (vendor, result) in gpus {
+        match result {
+            Ok(provider) => hub.add(provider),
+            Err(err) => why_not.push(format!("{vendor}: {}", reason(err))),
+        }
+    }
+    if why_not.len() == 2 {
+        hub.add_missing(
             &GPU_FEATURES,
-            format!("no supported GPU found ({})", reason(err)),
-        ),
+            format!("no supported GPU found ({})", why_not.join("; ")),
+        );
     }
     Ok(hub)
 }

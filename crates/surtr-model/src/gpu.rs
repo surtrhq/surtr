@@ -26,6 +26,8 @@ pub enum GpuProcessKind {
     Compute,
     /// Graphics (3D rendering, display).
     Graphics,
+    /// The driver doesn't say (for example Linux DRM `fdinfo`).
+    Unknown,
 }
 
 /// Why a GPU runs below its potential clock.
