@@ -216,7 +216,10 @@ fn mock_text_snapshots() {
     ];
     for (name, args) in cases {
         let (_, out) = surtr_code(args);
-        assert!(!out.contains('\u{1b}'), "{name}: color codes in piped output");
+        assert!(
+            !out.contains('\u{1b}'),
+            "{name}: color codes in piped output"
+        );
         insta::assert_snapshot!(name, out);
     }
 }
