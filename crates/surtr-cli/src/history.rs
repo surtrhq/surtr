@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use surtr_model::{SensorDescriptor, Timestamp};
 use surtr_store::{Bucket, StoredSensor};
 
-use crate::render::sensor_value;
+use surtr_view::format::value as sensor_value;
 
 /// Milliseconds in a duration such as `500ms`, `30s`, `10m`, `2h` or `7d`.
 /// A bare number is seconds.

@@ -19,6 +19,7 @@ milestones, and [the mockups](docs/mockups/README.md) for the intended UI.
 | [`surtr-backend-amd`](crates/surtr-backend-amd) | AMD GPUs on Linux through the `amdgpu` sysfs files: identity (named from `pci.ids`), sensors, per-process memory from DRM `fdinfo`. |
 | [`surtr-core`](crates/surtr-core) | The `Hub`, which combines the OS backend and GPU backends into one view. |
 | [`surtr-store`](crates/surtr-store) | Sensor history in SQLite (compiled in, not shipped separately): retention and bucketed queries. |
+| [`surtr-view`](crates/surtr-view) | What every front end shows: view models, value formatting, health levels and theme tokens (dark and light). |
 | [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, `record`, `history`, with `--json` and `--mock`. |
 
 ## Building

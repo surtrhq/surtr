@@ -428,6 +428,7 @@ dependencies = [
  "surtr-core",
  "surtr-model",
  "surtr-store",
+ "surtr-view",
 ]
 
 [[package]]
@@ -454,6 +455,15 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "surtr-model",
+]
+
+[[package]]
+name = "surtr-view"
+version = "0.1.0"
+dependencies = [
+ "surtr-backend",
+ "surtr-core",
  "surtr-model",
 ]
 

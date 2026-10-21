@@ -1,109 +1,26 @@
-//! Plain-text output. Styling (color, tables, charts) comes with the CLI/TUI
-//! quality pass in M3; this keeps the layout simple and stable for now.
+//! Plain-text layout of the shared view models (`surtr-view`). Styling
+//! (color, tables, charts) comes with the CLI quality pass in M3.
 
 use std::fmt::Write;
 
-use surtr_core::Sample;
-use surtr_model::{
-    Arch, Capabilities, CpuVendor, Feature, Field, GpuProcess, GpuProcessKind, GpuVendor, Support,
-    SystemInfo, ThrottleReason, ThrottleState, Unit,
+use surtr_model::{Capabilities, GpuProcess, SystemInfo, ThrottleState};
+use surtr_view::{
+    Section, capability_rows, process_rows, sensor_sections, system_sections, throttle_rows,
 };
-
-const MISSING: &str = "not available";
-
-fn show<T>(field: &Field<T>, fmt: impl Fn(&T) -> String) -> String {
-    field
-        .as_ref()
-        .map_or_else(|| MISSING.to_owned(), |f| fmt(&f.value))
-}
-
-fn text(field: &Field<String>) -> String {
-    show(field, Clone::clone)
-}
-
-fn gib(bytes: &u64) -> String {
-    format!("{:.1} GiB", *bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-}
-
-fn mhz(value: &f64) -> String {
-    format!("{value:.0} MHz")
-}
-
-fn arch(arch: &Arch) -> String {
-    match arch {
-        Arch::X86_64 => "x86-64".to_owned(),
-        Arch::Aarch64 => "ARM64".to_owned(),
-        Arch::Other(name) => name.clone(),
-    }
-}
-
-fn cpu_vendor(vendor: &CpuVendor) -> String {
-    match vendor {
-        CpuVendor::Intel => "Intel".to_owned(),
-        CpuVendor::Amd => "AMD".to_owned(),
-        CpuVendor::Arm => "Arm".to_owned(),
-        CpuVendor::Apple => "Apple".to_owned(),
-        CpuVendor::Qualcomm => "Qualcomm".to_owned(),
-        CpuVendor::Other(name) => name.clone(),
-    }
-}
-
-fn gpu_vendor(vendor: &GpuVendor) -> String {
-    match vendor {
-        GpuVendor::Nvidia => "NVIDIA".to_owned(),
-        GpuVendor::Amd => "AMD".to_owned(),
-        GpuVendor::Intel => "Intel".to_owned(),
-        GpuVendor::Apple => "Apple".to_owned(),
-        GpuVendor::Other(name) => name.clone(),
-    }
-}
-
-fn row(out: &mut String, label: &str, value: &str) {
-    // Writing to a String can't fail.
-    let _ = writeln!(out, "  {label:<14}{value}");
-}
 
 /// The `surtr info` report.
 pub fn info(provider: &str, system: &SystemInfo) -> String {
     let mut out = String::new();
-
-    out.push_str("OS\n");
-    row(&mut out, "Name", &text(&system.os.name));
-    row(&mut out, "Version", &text(&system.os.version));
-    if system.os.kernel.is_some() {
-        row(&mut out, "Kernel", &text(&system.os.kernel));
+    for (i, section) in system_sections(system).iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        // Writing to a String can't fail.
+        let _ = writeln!(out, "{}", section.title);
+        for row in &section.rows {
+            let _ = writeln!(out, "  {:<14}{}", row.label, row.cells[0].text);
+        }
     }
-    row(&mut out, "Architecture", &show(&system.os.arch, arch));
-
-    for (i, cpu) in system.cpus.iter().enumerate() {
-        let _ = writeln!(out, "\nCPU {i}");
-        row(&mut out, "Name", &text(&cpu.brand));
-        row(&mut out, "Vendor", &show(&cpu.vendor, cpu_vendor));
-        row(
-            &mut out,
-            "Cores",
-            &show(&cpu.physical_cores, u32::to_string),
-        );
-        row(
-            &mut out,
-            "Threads",
-            &show(&cpu.logical_cores, u32::to_string),
-        );
-        row(&mut out, "Base clock", &show(&cpu.base_clock_mhz, mhz));
-        row(&mut out, "Max clock", &show(&cpu.max_clock_mhz, mhz));
-    }
-
-    out.push_str("\nMemory\n");
-    row(&mut out, "Total", &show(&system.memory.total_bytes, gib));
-
-    for (i, gpu) in system.gpus.iter().enumerate() {
-        let _ = writeln!(out, "\nGPU {i}");
-        row(&mut out, "Name", &text(&gpu.name));
-        row(&mut out, "Vendor", &show(&gpu.vendor, gpu_vendor));
-        row(&mut out, "Memory", &show(&gpu.vram_bytes, gib));
-        row(&mut out, "Driver", &text(&gpu.driver_version));
-    }
-
     let _ = writeln!(
         out,
         "\nProviders: {provider}. Run with --json to see where each value came from."
@@ -111,93 +28,42 @@ pub fn info(provider: &str, system: &SystemInfo) -> String {
     out
 }
 
-fn feature_label(feature: Feature) -> &'static str {
-    match feature {
-        Feature::CpuIdentity => "CPU identity",
-        Feature::CpuLoad => "CPU load",
-        Feature::CpuClock => "CPU clocks",
-        Feature::CpuTemperature => "CPU temperature",
-        Feature::CpuPower => "CPU power",
-        Feature::CpuVoltage => "CPU voltage",
-        Feature::MemoryInfo => "Memory size",
-        Feature::MemoryTimings => "Memory timings",
-        Feature::GpuIdentity => "GPU identity",
-        Feature::GpuSensors => "GPU sensors",
-        Feature::GpuProcesses => "GPU processes",
-        Feature::GpuThrottleReasons => "GPU throttle reasons",
-        Feature::StorageHealth => "Storage health",
-        Feature::BoardSensors => "Board sensors",
-        Feature::FanControl => "Fan control",
-        Feature::CpuTuning => "CPU tuning",
-        Feature::GpuTuning => "GPU tuning",
-        _ => "Other",
-    }
-}
-
-fn support_label(support: Option<&Support>) -> String {
-    match support {
-        Some(Support::Available) => "available".to_owned(),
-        Some(Support::NeedsElevation) => "needs admin/root".to_owned(),
-        Some(Support::NeedsPrivilegedBackend) => "needs privileged backend".to_owned(),
-        Some(Support::NoHardware) => "no hardware".to_owned(),
-        Some(Support::Unsupported { reason }) => format!("unsupported ({reason})"),
-        None => "unknown".to_owned(),
-    }
-}
-
-/// The `surtr caps` report: every feature, including ones the provider
-/// doesn't mention.
+/// The `surtr caps` report: every feature, including ones no provider
+/// mentions.
 pub fn caps(provider: &str, capabilities: &Capabilities) -> String {
     let mut out = String::new();
-    for &feature in Feature::ALL {
-        let _ = writeln!(
-            out,
-            "{:<22}{}",
-            feature_label(feature),
-            support_label(capabilities.support(feature))
-        );
+    for row in capability_rows(capabilities) {
+        let _ = writeln!(out, "{:<22}{}", row.label, row.cells[0].text);
     }
     let _ = writeln!(out, "\nProviders: {provider}.");
     out
 }
 
-pub fn sensor_value(unit: Unit, v: f64) -> String {
-    match unit {
-        Unit::Celsius => format!("{v:.1} °C"),
-        Unit::Watt => format!("{v:.1} W"),
-        Unit::Volt => format!("{v:.3} V"),
-        Unit::Ampere => format!("{v:.2} A"),
-        Unit::Megahertz => format!("{v:.0} MHz"),
-        Unit::Percent => format!("{v:.1} %"),
-        Unit::Rpm => format!("{v:.0} RPM"),
-        Unit::Byte => format!("{:.1} GiB", v / (1024.0 * 1024.0 * 1024.0)),
-        Unit::Joule => format!("{v:.1} J"),
-        _ => format!("{v}"),
+fn sections(
+    out: &mut String,
+    sections: &[Section],
+    mut row: impl FnMut(&mut String, &surtr_view::Row),
+) {
+    for (i, section) in sections.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let _ = writeln!(out, "{}", section.title);
+        for r in &section.rows {
+            row(out, r);
+        }
     }
 }
 
 /// The `surtr sensors` report, grouped by device in provider order.
-pub fn sensors(provider: &str, sensors: &[Sample]) -> String {
+pub fn sensors(provider: &str, samples: &[surtr_core::Sample]) -> String {
     let mut out = String::new();
-    if sensors.is_empty() {
+    if samples.is_empty() {
         out.push_str("No sensors available on this machine yet.\n");
     }
-    let mut device: Option<&str> = None;
-    for s in sensors {
-        let d = s.descriptor.device.as_str();
-        if device != Some(d) {
-            if device.is_some() {
-                out.push('\n');
-            }
-            let _ = writeln!(out, "{d}");
-            device = Some(d);
-        }
-        let value = s.value.map_or_else(
-            || MISSING.to_owned(),
-            |v| sensor_value(s.descriptor.unit, v),
-        );
-        let _ = writeln!(out, "  {:<32}{value:>14}", s.descriptor.label);
-    }
+    sections(&mut out, &sensor_sections(samples), |out, row| {
+        let _ = writeln!(out, "  {:<32}{:>14}", row.label, row.cells[0].text);
+    });
     let _ = writeln!(
         out,
         "\nProviders: {provider}. Run with --json to see where each value came from."
@@ -211,44 +77,25 @@ pub fn gpu_processes(processes: &[GpuProcess]) -> String {
         return "No processes are using a GPU.\n".to_owned();
     }
     let mut out = String::new();
-    let mut device: Option<&str> = None;
-    for p in processes {
-        if device != Some(p.device.as_str()) {
-            if device.is_some() {
-                out.push('\n');
-            }
-            let _ = writeln!(out, "{}", p.device);
-            let _ = writeln!(out, "  {:<10}{:<11}{:>12}  Name", "PID", "Type", "Memory");
-            device = Some(p.device.as_str());
+    let groups = process_rows(processes);
+    for (i, section) in groups.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
         }
-        let kind = match p.kind {
-            GpuProcessKind::Compute => "compute",
-            GpuProcessKind::Graphics => "graphics",
-            GpuProcessKind::Unknown => "-",
-        };
-        let memory = p.used_memory_bytes.as_ref().map_or_else(
-            || "n/a".to_owned(),
-            |m| sensor_value(Unit::Byte, m.value as f64),
-        );
-        let name = p.name.as_deref().unwrap_or("?");
-        let _ = writeln!(out, "  {:<10}{kind:<11}{memory:>12}  {name}", p.pid);
+        let _ = writeln!(out, "{}", section.title);
+        let _ = writeln!(out, "  {:<10}{:<11}{:>12}  Name", "PID", "Type", "Memory");
+        for row in &section.rows {
+            let [kind, memory, name] = &row.cells[..] else {
+                continue;
+            };
+            let _ = writeln!(
+                out,
+                "  {:<10}{:<11}{:>12}  {}",
+                row.label, kind.text, memory.text, name.text
+            );
+        }
     }
     out
-}
-
-fn throttle_label(reason: ThrottleReason) -> &'static str {
-    match reason {
-        ThrottleReason::Idle => "idle",
-        ThrottleReason::ApplicationClocks => "application clock setting",
-        ThrottleReason::PowerCap => "power limit",
-        ThrottleReason::HardwareSlowdown => "hardware slowdown",
-        ThrottleReason::SyncBoost => "sync boost",
-        ThrottleReason::SoftwareThermal => "thermal limit (driver)",
-        ThrottleReason::HardwareThermal => "thermal limit (hardware)",
-        ThrottleReason::HardwarePowerBrake => "power brake",
-        ThrottleReason::DisplayClocks => "display clock setting",
-        _ => "other",
-    }
 }
 
 /// The `surtr gpu throttle` report.
@@ -257,17 +104,9 @@ pub fn throttle(states: &[ThrottleState]) -> String {
         return "No GPU reports throttle reasons.\n".to_owned();
     }
     let mut out = String::new();
-    for s in states {
-        let reasons = if s.reasons.is_empty() {
-            "none (running unrestricted)".to_owned()
-        } else {
-            s.reasons
-                .iter()
-                .map(|&r| throttle_label(r))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let _ = writeln!(out, "{:<12}{reasons}", s.device);
+    for row in throttle_rows(states) {
+        let reasons: Vec<&str> = row.cells.iter().map(|c| c.text.as_str()).collect();
+        let _ = writeln!(out, "{:<12}{}", row.label, reasons.join(", "));
     }
     out
 }
@@ -276,6 +115,8 @@ pub fn throttle(states: &[ThrottleState]) -> String {
 mod tests {
     use super::*;
     use surtr_backend::{Provider, mock::MockProvider};
+    use surtr_core::Sample;
+    use surtr_model::Feature;
 
     #[test]
     fn sensors_grouped_by_device() {

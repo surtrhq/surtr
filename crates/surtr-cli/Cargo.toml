@@ -19,6 +19,7 @@ surtr-backend-amd.workspace = true
 surtr-backend-nvidia.workspace = true
 surtr-core.workspace = true
 surtr-store.workspace = true
+surtr-view.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true

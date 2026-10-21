@@ -1,0 +1,18 @@
+[package]
+name = "surtr-view"
+description = "Front-end-neutral view models, formatting and theme tokens for Surtr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+surtr-model.workspace = true
+surtr-core.workspace = true
+
+[dev-dependencies]
+surtr-backend = { workspace = true, features = ["mock"] }
+
+[lints]
+workspace = true
