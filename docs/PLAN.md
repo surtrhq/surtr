@@ -1046,6 +1046,34 @@ beyond Advanced and Workstation.
    ROCm/AMD SMI and Intel Level Zero coverage, PresentMon licensing, and the
    exporters of the AI runtimes listed in 5.7.
 
+### Before making the repository public
+
+The repository is private for now. Do these when switching it to public:
+
+- [ ] **Security reporting:** enable private vulnerability reporting
+      (Settings → Code security; GitHub offers it only on public repositories)
+      and check that the steps in `SECURITY.md` work.
+- [ ] **Code of conduct:** add `CODE_OF_CONDUCT.md` with a non-personal
+      reporting contact (a project alias or a form, not a personal address).
+- [ ] **Contributing:** add `CONTRIBUTING.md` (DCO sign-off, how to run tests),
+      issue and PR templates, and the SKU-entry and sensor-mapping templates
+      (section 9).
+- [ ] **History check:** confirm every commit's author and committer address
+      is the public GitHub one, and that no secrets, tokens, internal paths or
+      private notes are in the history. Fixing history after going public
+      needs a rewrite.
+- [ ] **Branch protection on `main`:** require the CI checks, block force-push
+      and deletion.
+- [ ] **Security features:** turn on Dependabot alerts and security updates,
+      secret scanning and push protection.
+- [ ] **Actions settings:** default workflow token read-only; require approval
+      before workflows run for first-time outside contributors.
+- [ ] **License and naming:** confirm Apache-2.0 OR MIT and the copyright line;
+      run the trademark search for "Surtr" (section 9).
+- [ ] **Repository page:** description, topics, and a README status note that
+      the project is pre-release and that stress tests can crash a machine.
+- [ ] **Community:** decide whether to enable Discussions.
+
 ## Appendix A: landscape research notes and confidence
 
 Gathered 2026-10-20. Several vendor pages blocked automated fetching, so

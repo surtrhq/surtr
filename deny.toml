@@ -1,0 +1,17 @@
+# cargo-deny configuration: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[licenses]
+# Crates must be usable in an Apache-2.0 OR MIT project. Vendor binding crates
+# with other terms get explicit exceptions here when they arrive (plan, section 4).
+allow = ["MIT", "Apache-2.0", "Unicode-3.0"]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
