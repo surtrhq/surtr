@@ -134,6 +134,20 @@ enum Command {
         #[command(subcommand)]
         command: GpuCommand,
     },
+    /// Show recent alerts that `surtr serve` raised, or with --rules the
+    /// rules it uses.
+    Alerts {
+        /// Show the alert rules for this machine's sensors instead.
+        #[arg(long)]
+        rules: bool,
+        /// How many recent alerts to show.
+        #[arg(long, default_value_t = 20)]
+        last: usize,
+        /// Database file whose alerts to show (default: settings, else the
+        /// per-user data directory).
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
     /// Run in the background: poll sensors, record history and, with
     /// --metrics, serve Prometheus metrics. Stop with Ctrl+C.
     Serve {
@@ -592,6 +606,49 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>, settings: &Config) -> Result<Strin
                 json!({ "providers": providers, "throttle": throttle }),
                 render::throttle(&throttle),
             )
+        }
+        Command::Alerts { rules, last, db } => {
+            if *rules {
+                let rules = surtr_view::health::default_alert_rules(&hub.sensors());
+                let mut text = String::new();
+                for r in &rules {
+                    let (op, t) = match r.condition {
+                        surtr_core::alerts::Condition::Above(t) => ("≥", t),
+                        surtr_core::alerts::Condition::Below(t) => ("≤", t),
+                    };
+                    text.push_str(&format!(
+                        "{:<9}{op} {t:<6} for {:>3} s  {}\n",
+                        format!("{:?}", r.severity).to_lowercase(),
+                        r.for_ms / 1000,
+                        r.name
+                    ));
+                }
+                if rules.is_empty() {
+                    text.push_str(
+                        "No alert rules: this machine has no temperature sensors Surtr can read.\n",
+                    );
+                }
+                return out(json!({ "rules": rules }), text);
+            }
+            let path = serve::alerts_path(&db_path(db.as_ref(), settings)?);
+            let events: Vec<surtr_core::alerts::Event> = std::fs::read_to_string(&path)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect();
+            let recent = &events[events.len().saturating_sub(*last)..];
+            let mut text = String::new();
+            if recent.is_empty() {
+                text.push_str("No alerts recorded. `surtr serve` raises and records them.\n");
+            }
+            for e in recent {
+                text.push_str(&format!(
+                    "{}  {}\n",
+                    history::iso_utc(e.at),
+                    serve::describe(e)
+                ));
+            }
+            out(json!({ "alerts": recent }), text)
         }
         Command::Serve {
             interval,

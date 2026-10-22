@@ -22,7 +22,7 @@ milestones, and [the mockups](docs/mockups/README.md) for the intended UI.
 | [`surtr-store`](crates/surtr-store) | Sensor history in SQLite (compiled in, not shipped separately): retention and bucketed queries. |
 | [`surtr-view`](crates/surtr-view) | What every front end shows: view models, value formatting, health levels and theme tokens (dark and light). |
 | [`surtr-tui`](crates/surtr-tui) | `surtr tui`: Overview, Sensors (with trends and a `/` filter), GPU and Capabilities views; command palette (`:`); keyboard and mouse; works over SSH. |
-| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `status`, `tui`, `watch`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, `serve`, `record`, `history`, `export`, `diag`, `config`, `completions`, with `--json` and `--mock`. Colored on a terminal, plain when piped or with `NO_COLOR`. |
+| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `status`, `tui`, `watch`, `alerts`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, `serve`, `record`, `history`, `export`, `diag`, `config`, `completions`, with `--json` and `--mock`. Colored on a terminal, plain when piped or with `NO_COLOR`. |
 
 ## Building
 

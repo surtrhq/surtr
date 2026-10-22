@@ -5,16 +5,17 @@
 
 use std::{
     error::Error,
-    fs::File,
+    fs::{File, OpenOptions},
+    io::Write as _,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
     thread,
     time::Duration,
 };
 
 use axum::{Router, http::header, routing::get};
-use surtr_core::{Hub, paths};
+use surtr_core::{Hub, alerts, paths};
 use surtr_model::Timestamp;
 use surtr_store::Store;
 use surtr_view::Level;
@@ -33,6 +34,27 @@ pub struct Options {
     pub metrics: Option<SocketAddr>,
     /// Allow a non-loopback metrics address.
     pub metrics_remote: bool,
+}
+
+/// Where `surtr serve` appends alerts: `alerts.jsonl` next to the database.
+pub fn alerts_path(db: &Path) -> PathBuf {
+    db.with_file_name("alerts.jsonl")
+}
+
+/// One line for an alert event, for the log and the terminal.
+pub fn describe(e: &alerts::Event) -> String {
+    let state = match e.state {
+        alerts::State::Fired => "ALERT",
+        alerts::State::Resolved => "RESOLVED",
+    };
+    let severity = match e.severity {
+        alerts::Severity::Warning => "warning",
+        alerts::Severity::Critical => "critical",
+    };
+    format!(
+        "{state} {severity}: {} {} at {:.1} ({})",
+        e.device, e.label, e.value, e.rule
+    )
 }
 
 /// Runs until stopped (Ctrl+C) or `count` reads.
@@ -119,6 +141,11 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
             ""
         }
     );
+    let mut engine = alerts::Engine::new(surtr_view::health::default_alert_rules(&hub.sensors()));
+    let mut alert_log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(alerts_path(&opts.db))?;
     let system = hub.system_info();
     let capabilities = hub.capabilities();
     // Rate sensors need a first sample to compare with.
@@ -141,6 +168,12 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
         };
         *metrics.lock().unwrap_or_else(PoisonError::into_inner) =
             surtr_export::prometheus(&samples, &throttle, Some(level));
+        for event in engine.evaluate(&samples, Timestamp::now()) {
+            writeln!(alert_log, "{}", serde_json::to_string(&event)?)?;
+            let line = describe(&event);
+            tracing::warn!("{line}");
+            eprintln!("{line}");
+        }
         reads += 1;
         // Prune now and then, not on every read.
         if opts.retain_ms > 0 && reads % 600 == 1 {

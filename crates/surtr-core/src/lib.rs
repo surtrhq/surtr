@@ -11,6 +11,7 @@ use surtr_model::{
     ThrottleState, Timestamp,
 };
 
+pub mod alerts;
 pub mod config;
 pub mod paths;
 

@@ -622,3 +622,29 @@ fn serve_refuses_remote_metrics_without_opt_in() {
     ]);
     assert_eq!(code, Some(1));
 }
+
+#[test]
+fn alerts_rules_and_log() {
+    let v = json(&["--mock", "alerts", "--rules", "--json"]);
+    let rules = v["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 4, "two rules per mock temperature sensor");
+    assert_eq!(rules[1]["severity"], "critical");
+
+    let dir = std::env::temp_dir().join(format!("surtr-cli-alerts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("history.db");
+    let (ok, out) = surtr(&["alerts", "--db", db.to_str().unwrap()]);
+    assert!(ok);
+    assert!(out.starts_with("No alerts recorded"), "{out}");
+
+    let event = r#"{"at":1767225600000,"rule":"critical-temperature/mock/cpu0/package/temp","state":"fired","severity":"critical","provider":"mock","sensor":"cpu0/package/temp","device":"cpu0","label":"Package temperature","value":96.5}"#;
+    std::fs::write(dir.join("alerts.jsonl"), format!("{event}\nnot json\n")).unwrap();
+    let (ok, out) = surtr(&["alerts", "--db", db.to_str().unwrap()]);
+    assert!(ok);
+    assert_eq!(
+        out,
+        "2026-01-01T00:00:00Z  ALERT critical: cpu0 Package temperature at 96.5 (critical-temperature/mock/cpu0/package/temp)\n"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
