@@ -83,7 +83,7 @@ mod platform {
         fs::{self, DirBuilder, Permissions},
         future::Future,
         io,
-        os::unix::fs::{DirBuilderExt, PermissionsExt},
+        os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt},
         path::Path,
     };
 
@@ -98,8 +98,21 @@ mod platform {
         handler: Handler,
         shutdown: impl Future<Output = ()>,
     ) -> io::Result<()> {
+        // SAFETY: getuid has no preconditions.
+        #[allow(unsafe_code)]
+        let me = unsafe { libc::getuid() };
         if let Some(dir) = endpoint.parent() {
             DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+            // Another user could have created the directories first (the
+            // temp-dir fallback is guessable): refuse rather than share them.
+            for d in [Some(dir), dir.parent()].into_iter().flatten() {
+                if fs::symlink_metadata(d)?.uid() != me {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("{} belongs to another user", d.display()),
+                    ));
+                }
+            }
             fs::set_permissions(dir, Permissions::from_mode(0o700))?;
         }
         // A socket file left by a crashed daemon: remove it only if nothing
@@ -115,9 +128,6 @@ mod platform {
         }
         let listener = UnixListener::bind(endpoint)?;
         fs::set_permissions(endpoint, Permissions::from_mode(0o600))?;
-        // SAFETY: getuid has no preconditions.
-        #[allow(unsafe_code)]
-        let me = unsafe { libc::getuid() };
         tokio::pin!(shutdown);
         loop {
             tokio::select! {

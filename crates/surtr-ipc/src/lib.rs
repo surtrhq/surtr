@@ -82,9 +82,6 @@ pub fn endpoint() -> io::Result<PathBuf> {
     }
     #[cfg(unix)]
     {
-        if let Some(name) = custom {
-            return Ok(env::temp_dir().join(format!("{name}.sock")));
-        }
         // XDG_RUNTIME_DIR is per-user and private on Linux; elsewhere use a
         // directory under the temp dir that the server creates as 0700.
         let base = env::var_os("XDG_RUNTIME_DIR")
@@ -96,7 +93,8 @@ pub fn endpoint() -> io::Result<PathBuf> {
                 let uid = unsafe { libc::getuid() };
                 env::temp_dir().join(format!("surtr-{uid}"))
             });
-        Ok(base.join("surtr").join("serve.sock"))
+        let name = custom.unwrap_or_else(|| "serve".to_owned());
+        Ok(base.join("surtr").join(format!("{name}.sock")))
     }
 }
 
