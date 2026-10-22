@@ -13,6 +13,24 @@ use std::{collections::BTreeMap, fmt::Write};
 use surtr_core::Sample;
 use surtr_model::{SensorKind, ThrottleReason, ThrottleState, Unit};
 
+/// Every metric name Surtr can export. Dashboards may only use these (a test
+/// checks `dashboards/*.json`).
+pub const METRICS: [&str; 13] = [
+    "surtr_info",
+    "surtr_health_level",
+    "surtr_temperature_celsius",
+    "surtr_power_watts",
+    "surtr_voltage_volts",
+    "surtr_current_amperes",
+    "surtr_clock_hertz",
+    "surtr_load_ratio",
+    "surtr_fan_rpm",
+    "surtr_fan_ratio",
+    "surtr_memory_used_bytes",
+    "surtr_energy_joules",
+    "surtr_gpu_throttle_active",
+];
+
 /// How one sensor kind and unit is exported: metric name, help text and the
 /// factor from Surtr's unit to the metric's base unit.
 fn family(kind: SensorKind, unit: Unit) -> Option<(&'static str, &'static str, f64)> {
@@ -168,6 +186,65 @@ mod tests {
         }
         // Each family's HELP and TYPE appear once.
         assert_eq!(text.matches("# TYPE surtr_temperature_celsius").count(), 1);
+    }
+
+    fn metric_names(text: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut rest = text;
+        while let Some(i) = rest.find("surtr_") {
+            let tail = &rest[i..];
+            let end = tail
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(tail.len());
+            names.push(tail[..end].to_owned());
+            rest = &tail[end..];
+        }
+        names
+    }
+
+    // Everything the exporter emits is in METRICS.
+    #[test]
+    fn exported_names_are_listed() {
+        let mock = MockProvider::desktop();
+        let text = prometheus(&samples(&mock), &mock.throttle_reasons().unwrap(), Some(0));
+        for line in text.lines().filter(|l| !l.starts_with('#')) {
+            let name = line.split(['{', ' ']).next().unwrap();
+            assert!(METRICS.contains(&name), "{name} is not in METRICS");
+        }
+    }
+
+    // Every query in the shipped dashboards uses a metric Surtr exports.
+    #[test]
+    fn dashboards_use_exported_metrics() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../dashboards");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let dashboard: serde_json::Value =
+                serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            assert!(
+                dashboard["panels"]
+                    .as_array()
+                    .is_some_and(|p| !p.is_empty())
+            );
+            for name in metric_names(&text) {
+                assert!(
+                    METRICS.contains(&name.as_str()),
+                    "{}: unknown metric {name}",
+                    path.display()
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 10,
+            "no dashboard queries found in {}",
+            dir.display()
+        );
     }
 
     #[test]

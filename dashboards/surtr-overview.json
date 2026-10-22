@@ -1,0 +1,111 @@
+{
+  "title": "Surtr: Overview",
+  "uid": "surtr-overview",
+  "description": "Health, CPU, memory and GPU from surtr serve --metrics.",
+  "tags": ["surtr"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "ds",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus"
+      },
+      {
+        "name": "instance",
+        "label": "Machine",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${ds}" },
+        "query": "label_values(surtr_info, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Health",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "max by (instance) (surtr_health_level{instance=~\"$instance\"})", "legendFormat": "{{instance}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": {
+              "0": { "text": "OK", "color": "green" },
+              "1": { "text": "Warning", "color": "yellow" },
+              "2": { "text": "Critical", "color": "red" }
+            } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "red", "value": 2 }
+          ] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU load",
+      "gridPos": { "x": 6, "y": 0, "w": 18, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_load_ratio{instance=~\"$instance\", device=~\"cpu.*\", sensor!~\".*thread.*\"}", "legendFormat": "{{instance}} {{label}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU temperature",
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_temperature_celsius{instance=~\"$instance\", device=~\"cpu.*\"}", "legendFormat": "{{instance}} {{label}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "celsius" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory used",
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_memory_used_bytes{instance=~\"$instance\", device=\"memory\"}", "legendFormat": "{{instance}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "GPU temperature",
+      "gridPos": { "x": 0, "y": 13, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_temperature_celsius{instance=~\"$instance\", device=~\"(nvidia|amd|gpu).*\"}", "legendFormat": "{{instance}} {{device}} {{label}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "celsius" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "GPU board power",
+      "gridPos": { "x": 12, "y": 13, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_power_watts{instance=~\"$instance\", device=~\"(nvidia|amd|gpu).*\", label=\"Board power\"}", "legendFormat": "{{instance}} {{device}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "watt", "min": 0 }, "overrides": [] }
+    }
+  ]
+}

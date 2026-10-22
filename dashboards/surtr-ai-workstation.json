@@ -1,0 +1,116 @@
+{
+  "title": "Surtr: AI workstation",
+  "uid": "surtr-ai-workstation",
+  "description": "Per-GPU load, VRAM, power against its limit, temperatures, clocks and throttle reasons from surtr serve --metrics.",
+  "tags": ["surtr", "gpu"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "ds",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus"
+      },
+      {
+        "name": "instance",
+        "label": "Machine",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${ds}" },
+        "query": "label_values(surtr_info, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      },
+      {
+        "name": "gpu",
+        "label": "GPU",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${ds}" },
+        "query": "label_values(surtr_temperature_celsius{instance=~\"$instance\", device=~\"(nvidia|amd|gpu).*\"}, device)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "GPU load",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_load_ratio{instance=~\"$instance\", device=~\"$gpu\", label=\"GPU load\"}", "legendFormat": "{{instance}} {{device}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "VRAM used",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_memory_used_bytes{instance=~\"$instance\", device=~\"$gpu\"}", "legendFormat": "{{instance}} {{device}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Power and power limit",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_power_watts{instance=~\"$instance\", device=~\"$gpu\", label=\"Board power\"}", "legendFormat": "{{instance}} {{device}} power" },
+        { "refId": "B", "expr": "surtr_power_watts{instance=~\"$instance\", device=~\"$gpu\", label=\"Power limit\"}", "legendFormat": "{{instance}} {{device}} limit" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "watt", "min": 0 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Temperatures",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_temperature_celsius{instance=~\"$instance\", device=~\"$gpu\"}", "legendFormat": "{{instance}} {{device}} {{label}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "celsius" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Clocks",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_clock_hertz{instance=~\"$instance\", device=~\"$gpu\"}", "legendFormat": "{{instance}} {{device}} {{label}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "hertz" }, "overrides": [] }
+    },
+    {
+      "type": "state-timeline",
+      "title": "What limits the GPU clock",
+      "description": "Throttle reasons that cost performance (idle and display clocks are left out). The usual answer to \"why did tokens/s drop?\".",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "targets": [
+        { "refId": "A", "expr": "surtr_gpu_throttle_active{instance=~\"$instance\", device=~\"$gpu\", reason!~\"idle|display_clocks\"}", "legendFormat": "{{instance}} {{device}} {{reason}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": {
+              "0": { "text": "no", "color": "transparent" },
+              "1": { "text": "limiting", "color": "orange" }
+            } }
+          ],
+          "color": { "mode": "fixed", "fixedColor": "orange" }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}
