@@ -22,6 +22,7 @@ mod diag;
 mod export;
 mod history;
 mod logging;
+mod notify;
 mod render;
 mod serve;
 mod style;
@@ -171,6 +172,9 @@ enum Command {
         /// is no authentication.
         #[arg(long)]
         metrics_remote: bool,
+        /// No desktop notifications for alerts (overrides alerts.notify).
+        #[arg(long)]
+        no_notify: bool,
     },
     /// Record every sensor into the history database until stopped (Ctrl+C)
     /// or until --count samples are stored.
@@ -657,6 +661,7 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>, settings: &Config) -> Result<Strin
             db,
             metrics,
             metrics_remote,
+            no_notify,
         } => {
             let retain_ms = history::parse_duration_ms(
                 retain
@@ -673,6 +678,7 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>, settings: &Config) -> Result<Strin
                     db: db_path(db.as_ref(), settings)?,
                     metrics: *metrics,
                     metrics_remote: *metrics_remote,
+                    notify: settings.alerts.notify() && !*no_notify,
                 },
             )
         }

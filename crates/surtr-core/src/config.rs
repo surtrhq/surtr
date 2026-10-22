@@ -22,6 +22,10 @@ pub const TEMPLATE: &str = r#"# Surtr settings. Every setting is optional; comma
 # retain = "7d"
 # Database file; default is history.db in Surtr's data directory.
 # path = "C:/path/to/history.db"
+
+[alerts]
+# Desktop notifications for alerts that surtr serve raises.
+# notify = true
 "#;
 
 /// General settings.
@@ -42,6 +46,20 @@ pub struct History {
     pub path: Option<String>,
 }
 
+/// Alert settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Alerts {
+    /// Show desktop notifications for alerts raised by `surtr serve`.
+    pub notify: Option<bool>,
+}
+
+impl Alerts {
+    /// Whether to notify (default: yes).
+    pub fn notify(&self) -> bool {
+        self.notify.unwrap_or(true)
+    }
+}
+
 /// All settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
@@ -51,6 +69,9 @@ pub struct Config {
     /// `[history]`.
     #[serde(default)]
     pub history: History,
+    /// `[alerts]`.
+    #[serde(default)]
+    pub alerts: Alerts,
 }
 
 /// Settings plus warnings about the file (unknown keys).
@@ -63,7 +84,8 @@ pub struct Loaded {
 }
 
 /// Keys Surtr knows, as `section.key`.
-const KNOWN: [&str; 4] = [
+const KNOWN: [&str; 5] = [
+    "alerts.notify",
     "general.interval_ms",
     "general.theme",
     "history.retain",
@@ -121,6 +143,9 @@ impl Config {
                         .unwrap_or_else(|| "7d".to_owned()),
                 ),
                 path: self.history.path.clone(),
+            },
+            alerts: Alerts {
+                notify: Some(self.alerts.notify()),
             },
         };
         toml::to_string_pretty(&shown).unwrap_or_default()

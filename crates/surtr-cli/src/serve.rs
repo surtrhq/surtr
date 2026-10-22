@@ -34,6 +34,8 @@ pub struct Options {
     pub metrics: Option<SocketAddr>,
     /// Allow a non-loopback metrics address.
     pub metrics_remote: bool,
+    /// Show desktop notifications for fired alerts.
+    pub notify: bool,
 }
 
 /// Where `surtr serve` appends alerts: `alerts.jsonl` next to the database.
@@ -173,6 +175,9 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
             let line = describe(&event);
             tracing::warn!("{line}");
             eprintln!("{line}");
+            if opts.notify {
+                crate::notify::send(&event);
+            }
         }
         reads += 1;
         // Prune now and then, not on every read.
