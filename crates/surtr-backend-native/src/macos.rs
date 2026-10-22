@@ -143,7 +143,9 @@ fn cpu_ticks() -> Option<Vec<CpuTimes>> {
     // system, idle, nice).
     let ticks = unsafe { slice::from_raw_parts(info, len as usize) };
     let out = ticks
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .take(cpus as usize)
         .map(|t| {
             let tick = |i: usize| u64::from(t[i] as u32);
