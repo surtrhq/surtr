@@ -8,6 +8,11 @@ use serde_json::Value;
 fn surtr_command() -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_surtr"));
     cmd.env("SURTR_LOG_DIR", test_log_dir());
+    // Never read the user's settings; config tests point this elsewhere.
+    cmd.env(
+        "SURTR_CONFIG_DIR",
+        std::env::temp_dir().join(format!("surtr-cli-test-config-{}", std::process::id())),
+    );
     cmd
 }
 
@@ -429,5 +434,86 @@ fn export_csv_and_json() {
 
     let (ok, _) = surtr(&["export", "no-such-sensor", "--since", "1000d", "--db", db]);
     assert!(!ok);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Runs surtr with settings in `dir`; returns (exit code, stdout, stderr).
+fn surtr_with_config(dir: &std::path::Path, args: &[&str]) -> (Option<i32>, String, String) {
+    let output = surtr_command()
+        .env("SURTR_CONFIG_DIR", dir)
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn config_init_show_and_path() {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-config-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let (code, out, _) = surtr_with_config(&dir, &["config", "path"]);
+    assert_eq!(code, Some(0));
+    assert!(out.trim_end().ends_with("config.toml"), "{out}");
+
+    let (code, out, _) = surtr_with_config(&dir, &["config", "show"]);
+    assert_eq!(code, Some(0));
+    assert!(
+        out.contains("interval_ms = 1000") && out.contains("retain = \"7d\""),
+        "{out}"
+    );
+
+    let (code, _, _) = surtr_with_config(&dir, &["config", "init"]);
+    assert_eq!(code, Some(0));
+    assert!(dir.join("config.toml").exists());
+    let (code, _, err) = surtr_with_config(&dir, &["config", "init"]);
+    assert_eq!(code, Some(1), "init must not overwrite");
+    assert!(err.contains("already exists"), "{err}");
+
+    std::fs::write(
+        dir.join("config.toml"),
+        "[general]\ninterval_ms = 250\ntheme = \"light\"\nbogus = 1\n",
+    )
+    .unwrap();
+    let (code, out, err) = surtr_with_config(&dir, &["config", "show", "--json"]);
+    assert_eq!(code, Some(0));
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["general"]["interval_ms"], 250);
+    assert!(err.contains("unknown setting general.bogus"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// A broken settings file is reported and ignored; commands still work.
+#[test]
+fn broken_config_is_ignored() {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-badconfig-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("config.toml"),
+        "[general]\ninterval_ms = \"fast\"\n",
+    )
+    .unwrap();
+    let (code, out, err) = surtr_with_config(&dir, &["--mock", "info"]);
+    assert_eq!(code, Some(0));
+    assert!(out.contains("Mock 8-Core Processor"));
+    assert!(err.contains("ignoring the settings file"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// The interval from the settings file is used when no flag is given.
+#[test]
+fn config_interval_applies() {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-interval-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("config.toml"), "[general]\ninterval_ms = 0\n").unwrap();
+    let (code, out, _) = surtr_with_config(&dir, &["--mock", "watch", "--count", "1"]);
+    assert_eq!(code, Some(0));
+    assert!(out.contains("every 0 ms"), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }

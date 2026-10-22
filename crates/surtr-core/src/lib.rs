@@ -11,6 +11,7 @@ use surtr_model::{
     ThrottleState, Timestamp,
 };
 
+pub mod config;
 pub mod paths;
 
 /// The value of a provider call, or `None` after logging why it failed.

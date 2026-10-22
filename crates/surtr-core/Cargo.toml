@@ -12,6 +12,7 @@ surtr-model.workspace = true
 surtr-backend.workspace = true
 serde.workspace = true
 tracing = "0.1"
+toml = "1"
 
 [dev-dependencies]
 surtr-backend = { workspace = true, features = ["mock"] }

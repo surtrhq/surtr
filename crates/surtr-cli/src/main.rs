@@ -11,7 +11,10 @@ use surtr_backend::{Provider, ProviderError, mock::MockProvider};
 use surtr_backend_amd::AmdProvider;
 use surtr_backend_native::{AMD, INTEL, NVIDIA, NativeProvider, process_name};
 use surtr_backend_nvidia::NvidiaProvider;
-use surtr_core::Hub;
+use surtr_core::{
+    Hub,
+    config::{self, Config},
+};
 use surtr_model::{Feature, Remedy, SensorId, Timestamp};
 use surtr_store::Store;
 
@@ -63,9 +66,15 @@ enum Command {
     /// Show a health summary with plain-language findings. Exit code: 0 ok,
     /// 2 warning, 3 critical (1 is an error running surtr).
     Status {
-        /// Milliseconds between the priming read and the reported one.
-        #[arg(long, default_value_t = 1000)]
-        interval: u64,
+        /// Milliseconds between the priming read and the reported one
+        /// (default: general.interval_ms in the settings, else 1000).
+        #[arg(long)]
+        interval: Option<u64>,
+    },
+    /// Show, locate or create the settings file.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
     },
     /// Print a shell completion script, for example
     /// `surtr completions powershell >> $PROFILE`.
@@ -78,9 +87,10 @@ enum Command {
     /// Read every sensor once and show the values.
     Sensors {
         /// Milliseconds between the priming read and the reported one; rate
-        /// sensors such as CPU load need two samples.
-        #[arg(long, default_value_t = 1000)]
-        interval: u64,
+        /// sensors such as CPU load need two samples (default: settings, else
+        /// 1000).
+        #[arg(long)]
+        interval: Option<u64>,
     },
     /// Create a diagnostic bundle for a bug report: a Markdown summary plus
     /// redacted system info, capabilities, sensors and recent logs, as a zip.
@@ -103,9 +113,9 @@ enum Command {
         /// (for example `temp`, `gpu`, `cpu/load`). Default: all but
         /// per-thread sensors.
         filters: Vec<String>,
-        /// Milliseconds between updates.
-        #[arg(long, default_value_t = 1000)]
-        interval: u64,
+        /// Milliseconds between updates (default: settings, else 1000).
+        #[arg(long)]
+        interval: Option<u64>,
         /// Stop after this many updates.
         #[arg(long)]
         count: Option<u64>,
@@ -113,9 +123,9 @@ enum Command {
     /// Interactive terminal UI: overview, sensors with trends, GPUs and
     /// capabilities. Works over SSH. Press ? inside for keys.
     Tui {
-        /// Milliseconds between refreshes.
-        #[arg(long, default_value_t = 1000)]
-        interval: u64,
+        /// Milliseconds between refreshes (default: settings, else 1000).
+        #[arg(long)]
+        interval: Option<u64>,
     },
     /// GPU processes and throttle reasons.
     Gpu {
@@ -125,15 +135,16 @@ enum Command {
     /// Record every sensor into the history database until stopped (Ctrl+C)
     /// or until --count samples are stored.
     Record {
-        /// Milliseconds between samples.
-        #[arg(long, default_value_t = 1000)]
-        interval: u64,
+        /// Milliseconds between samples (default: settings, else 1000).
+        #[arg(long)]
+        interval: Option<u64>,
         /// Stop after this many samples.
         #[arg(long)]
         count: Option<u64>,
-        /// Delete samples older than this (for example 7d or 12h); 0 keeps all.
-        #[arg(long, default_value = "7d")]
-        retain: String,
+        /// Delete samples older than this (for example 7d or 12h); 0 keeps all
+        /// (default: history.retain in the settings, else 7d).
+        #[arg(long)]
+        retain: Option<String>,
         /// Database file (default: the per-user data directory).
         #[arg(long)]
         db: Option<PathBuf>,
@@ -180,10 +191,67 @@ enum Command {
     },
 }
 
-fn db_path(db: Option<&PathBuf>) -> Result<PathBuf, String> {
+fn db_path(db: Option<&PathBuf>, settings: &Config) -> Result<PathBuf, String> {
     db.cloned()
+        .or_else(|| settings.history.path.as_ref().map(PathBuf::from))
         .or_else(surtr_core::paths::history_db)
         .ok_or_else(|| "no per-user data directory found; pass --db".to_owned())
+}
+
+/// The settings file, or defaults. Problems are reported on stderr and
+/// never stop Surtr.
+fn load_settings() -> Config {
+    let Some(path) = surtr_core::paths::config_file() else {
+        return Config::default();
+    };
+    match config::load(&path) {
+        Ok(loaded) => {
+            for w in &loaded.warnings {
+                eprintln!(
+                    "surtr: {}: {w}",
+                    surtr_core::paths::redact(&path.display().to_string())
+                );
+            }
+            loaded.config
+        }
+        Err(err) => {
+            eprintln!(
+                "surtr: ignoring the settings file: {}",
+                surtr_core::paths::redact(&err)
+            );
+            Config::default()
+        }
+    }
+}
+
+/// `surtr config show|path|init`.
+fn config_command(
+    command: &ConfigCommand,
+    settings: &Config,
+    json: bool,
+) -> Result<String, String> {
+    let path = surtr_core::paths::config_file()
+        .ok_or_else(|| "no per-user configuration directory found".to_owned())?;
+    let shown = surtr_core::paths::redact(&path.display().to_string());
+    match command {
+        ConfigCommand::Path => Ok(format!("{shown}\n")),
+        ConfigCommand::Show if json => serde_json::to_string_pretty(settings)
+            .map(|s| s + "\n")
+            .map_err(|e| e.to_string()),
+        ConfigCommand::Show => Ok(format!("# {shown}\n{}", settings.effective())),
+        ConfigCommand::Init => {
+            if path.exists() {
+                return Err(format!(
+                    "{shown} already exists; edit it or remove it first"
+                ));
+            }
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(&path, config::TEMPLATE).map_err(|e| e.to_string())?;
+            Ok(format!("Wrote {shown} with every setting commented out.\n"))
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -192,6 +260,16 @@ enum GpuCommand {
     Procs,
     /// Why each GPU runs below its potential clock right now.
     Throttle,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    /// Print the effective settings (defaults filled in).
+    Show,
+    /// Print where the settings file is.
+    Path,
+    /// Create the settings file with every setting commented out.
+    Init,
 }
 
 /// File formats for `surtr export`.
@@ -295,10 +373,25 @@ fn main() -> ExitCode {
         clap_complete::generate(*shell, &mut Cli::command(), "surtr", &mut std::io::stdout());
         return ExitCode::SUCCESS;
     }
+    let settings = load_settings();
+    // Settings commands need no hardware access either.
+    if let Some(Command::Config { command }) = &cli.command {
+        return match config_command(command, &settings, cli.json) {
+            Ok(text) => {
+                anstream::print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("surtr: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let _logging = logging::init();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), command = ?cli.command, "surtr started");
     let code = Cell::new(0);
-    let result = hub(cli.mock).and_then(|hub| run(&cli, &hub, &code).map_err(|e| e.to_string()));
+    let result =
+        hub(cli.mock).and_then(|hub| run(&cli, &hub, &code, &settings).map_err(|e| e.to_string()));
     match result {
         Ok(output) => {
             // anstream drops styling when not writing to a terminal.
@@ -314,7 +407,9 @@ fn main() -> ExitCode {
 
 /// Runs the command and returns its output; `code` receives a non-zero exit
 /// code for commands that report one (`status`).
-fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> {
+fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>, settings: &Config) -> Result<String, Box<dyn Error>> {
+    // A flag wins over the settings file, which wins over the default.
+    let ms = |flag: &Option<u64>| flag.or(settings.general.interval_ms).unwrap_or(1000);
     let providers = hub.provider_ids();
     let names = providers.join(", ");
     let out = |value: serde_json::Value, text: String| -> Result<String, Box<dyn Error>> {
@@ -334,7 +429,7 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
         }
         Command::Status { interval } => {
             hub.read();
-            thread::sleep(Duration::from_millis(*interval));
+            thread::sleep(Duration::from_millis(ms(interval)));
             let samples = hub.read();
             let status = surtr_view::status(
                 &hub.system_info(),
@@ -367,7 +462,9 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
                 render::status(&status),
             )
         }
-        Command::Completions { .. } => unreachable!("handled before hardware access"),
+        Command::Completions { .. } | Command::Config { .. } => {
+            unreachable!("handled before hardware access")
+        }
         Command::Diag {
             summary,
             out: path,
@@ -418,15 +515,19 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
             watch::run(
                 hub,
                 filters,
-                Duration::from_millis(*interval),
+                Duration::from_millis(ms(interval)),
                 *count,
                 cli.json,
             )?;
             Ok(String::new())
         }
         Command::Tui { interval } => {
-            let interval = Duration::from_millis((*interval).max(100));
-            surtr_tui::run(hub, interval, &process_name)?;
+            let interval = Duration::from_millis(ms(interval).max(100));
+            let theme = match settings.general.theme.as_deref() {
+                Some("light") => surtr_view::Theme::LIGHT,
+                _ => surtr_view::Theme::DARK,
+            };
+            surtr_tui::run(hub, interval, theme, &process_name)?;
             Ok(String::new())
         }
         Command::Caps => {
@@ -438,7 +539,7 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
         }
         Command::Sensors { interval } => {
             hub.read();
-            thread::sleep(Duration::from_millis(*interval));
+            thread::sleep(Duration::from_millis(ms(interval)));
             let samples = hub.read();
             out(
                 json!({ "providers": providers, "sensors": samples }),
@@ -472,13 +573,20 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
             retain,
             db,
         } => {
-            let path = db_path(db.as_ref())?;
-            let retain = history::parse_duration_ms(retain)?;
+            let path = db_path(db.as_ref(), settings)?;
+            let retain = history::parse_duration_ms(
+                retain
+                    .as_deref()
+                    .or(settings.history.retain.as_deref())
+                    .unwrap_or("7d"),
+            )?;
+            let interval = &Some(ms(interval));
             let mut store = Store::open(&path)?;
             let sensors = hub.sensors().len();
             eprintln!(
-                "Recording {sensors} sensors to {} every {interval} ms{}.",
+                "Recording {sensors} sensors to {} every {} ms{}.",
                 path.display(),
+                ms(interval),
                 if count.is_none() {
                     "; press Ctrl+C to stop"
                 } else {
@@ -490,7 +598,7 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
             let mut stored = 0;
             let mut taken = 0;
             while count.is_none_or(|c| taken < c) {
-                thread::sleep(Duration::from_millis(*interval));
+                thread::sleep(Duration::from_millis(ms(interval)));
                 let samples = hub.read();
                 stored += store.record(
                     samples
@@ -516,7 +624,7 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
             out: file,
             db,
         } => {
-            let path = db_path(db.as_ref())?;
+            let path = db_path(db.as_ref(), settings)?;
             let store = Store::open(&path)?;
             let sensors = store.sensors()?;
             let now = Timestamp::now();
@@ -562,7 +670,7 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
             bucket,
             db,
         } => {
-            let path = db_path(db.as_ref())?;
+            let path = db_path(db.as_ref(), settings)?;
             let store = Store::open(&path)?;
             let known = store.sensors()?;
             let Some(sensor) = sensor else {

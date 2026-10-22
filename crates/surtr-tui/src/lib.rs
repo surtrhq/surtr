@@ -28,13 +28,18 @@ pub use ui::draw;
 
 /// Runs the TUI on the current terminal until the user quits, refreshing
 /// every `interval`. `name` resolves process ids to names.
-pub fn run(hub: &Hub, interval: Duration, name: &dyn Fn(u32) -> Option<String>) -> io::Result<()> {
+pub fn run(
+    hub: &Hub,
+    interval: Duration,
+    theme: Theme,
+    name: &dyn Fn(u32) -> Option<String>,
+) -> io::Result<()> {
     if !io::stdout().is_terminal() {
         return Err(io::Error::other(
             "the TUI needs an interactive terminal; use `surtr sensors` or `surtr status` for piped output",
         ));
     }
-    let palette = Palette::new(Theme::DARK, Depth::detect());
+    let palette = Palette::new(theme, Depth::detect());
     let mut app = App::new(hub);
     // ratatui::init also restores the terminal if Surtr panics.
     let mut terminal = ratatui::init();

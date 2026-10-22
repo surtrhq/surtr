@@ -55,6 +55,28 @@ pub fn log_dir() -> Option<PathBuf> {
     }
 }
 
+/// Surtr's configuration directory: `%APPDATA%\surtr`,
+/// `~/Library/Application Support/surtr`, or `$XDG_CONFIG_HOME/surtr`
+/// (`~/.config/surtr`). `SURTR_CONFIG_DIR` overrides it.
+pub fn config_dir() -> Option<PathBuf> {
+    if let Some(dir) = var("SURTR_CONFIG_DIR") {
+        return Some(dir);
+    }
+    let base = if cfg!(windows) {
+        var("APPDATA")?
+    } else if cfg!(target_os = "macos") {
+        home()?.join("Library/Application Support")
+    } else {
+        var("XDG_CONFIG_HOME").or_else(|| home().map(|h| h.join(".config")))?
+    };
+    Some(base.join("surtr"))
+}
+
+/// The settings file.
+pub fn config_file() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("config.toml"))
+}
+
 /// The default sensor history database.
 pub fn history_db() -> Option<PathBuf> {
     data_dir().map(|d| d.join("history.db"))
