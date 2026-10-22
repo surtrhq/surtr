@@ -1,0 +1,123 @@
+name: Release
+
+# A tag such as v0.1.0 builds every target, then publishes a GitHub
+# pre-release with the archives, SHA-256 checksums and build attestations.
+# A pull request that changes this file runs the builds without publishing.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 22.04's glibc keeps the binaries working on older distros.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+    steps:
+      # Third-party actions are pinned to commits; release builds use no
+      # cache, so nothing from other runs can end up in a binary.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - run: cargo build --release --locked -p surtr-cli
+      - name: Smoke test
+        shell: bash
+        run: |
+          bin=target/release/surtr
+          "$bin" --version
+          "$bin" --mock info
+      - name: Package
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          [[ "$version" == v* ]] || version="dev"
+          name="surtr-${version}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp README.md CHANGELOG.md LICENSE-APACHE LICENSE-MIT "dist/$name/"
+          cp -r skills "dist/$name/"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp target/release/surtr.exe "dist/$name/"
+            (cd dist && pwsh -NoProfile -Command "Compress-Archive -Path '$name' -DestinationPath '$name.zip'")
+          else
+            cp target/release/surtr "dist/$name/"
+            tar -C dist -czf "dist/$name.tar.gz" "$name"
+          fi
+          rm -rf "dist/$name"
+          ls -l dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag matches the crate version
+        run: |
+          crate="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          [[ "$crate" == "$GITHUB_REF_NAME" ]] || { echo "tag $GITHUB_REF_NAME, Cargo.toml $crate"; exit 1; }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            /^## / { if (found) exit; if (index($0, "[" v "]")) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          [[ -s notes.md ]] || { echo "no CHANGELOG.md section for $version"; exit 1; }
+          cat >> notes.md <<'EOF'
+
+          ---
+          Verify a download: `sha256sum -c SHA256SUMS --ignore-missing`, and
+          `gh attestation verify <file> --repo surtrhq/surtr` to check it was
+          built by this repository's CI. The binaries are not code-signed, so
+          Windows SmartScreen and macOS Gatekeeper warn on first start.
+          EOF
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Surtr ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            --prerelease \
+            --verify-tag
