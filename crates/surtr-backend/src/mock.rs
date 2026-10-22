@@ -273,6 +273,7 @@ fn sensor(
             device: device.to_owned(),
             label: label.to_owned(),
             source: Source::new(MockProvider::ID, "synthetic"),
+            limits: Default::default(),
         },
         base,
         amplitude,

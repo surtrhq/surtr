@@ -99,6 +99,29 @@ pub struct SensorDescriptor {
     pub label: String,
     /// Where its readings come from.
     pub source: Source,
+    /// Limits the hardware itself reports, if any.
+    #[serde(default, skip_serializing_if = "Limits::is_empty")]
+    pub limits: Limits,
+}
+
+/// Limits a device reports for one of its sensors, in the sensor's unit,
+/// for example hwmon's `temp1_max` and `temp1_crit`. Health checks prefer
+/// them to generic thresholds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct Limits {
+    /// Where the device considers the value high.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub high: Option<f64>,
+    /// Where the device protects itself (throttles or shuts down).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub critical: Option<f64>,
+}
+
+impl Limits {
+    /// Neither limit is known.
+    pub fn is_empty(&self) -> bool {
+        self.high.is_none() && self.critical.is_none()
+    }
 }
 
 /// Milliseconds since the Unix epoch.

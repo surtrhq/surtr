@@ -99,6 +99,7 @@ fn descriptor(
         device: device.to_owned(),
         label: label.to_owned(),
         source: source.clone(),
+        limits: Default::default(),
     }
 }
 

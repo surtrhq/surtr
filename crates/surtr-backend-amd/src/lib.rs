@@ -148,6 +148,7 @@ impl Card {
                 device: device.clone(),
                 label,
                 source: source.clone(),
+                limits: Default::default(),
             };
             sensors.push((descriptor, path, divisor));
         };
@@ -360,7 +361,12 @@ impl Provider for AmdProvider {
 
     fn system_info(&self) -> Result<SystemInfo, ProviderError> {
         let sysfs = Source::new(Self::ID, "sysfs");
-        let driver = read(self.sys_root.join("module/amdgpu/version"));
+        // A driver built as a module has a version; the one built into the
+        // kernel goes by the kernel release.
+        let driver = read(self.sys_root.join("module/amdgpu/version")).or_else(|| {
+            read(self.proc_root.join("sys/kernel/osrelease"))
+                .map(|k| format!("in kernel {}", k.trim()))
+        });
         let gpus = self
             .cards
             .iter()
@@ -585,6 +591,12 @@ mod tests {
         assert_eq!(gpu.vram_bytes.as_ref().unwrap().value, 25_753_026_560);
         // An empty version file means unknown, not "".
         assert!(gpu.driver_version.is_none());
+
+        // The driver built into the kernel goes by the kernel release.
+        fx.file("proc/sys/kernel/osrelease", "7.0.0-38-generic\n");
+        let info = provider(&fx).system_info().unwrap();
+        let driver = info.gpus[0].driver_version.as_ref().unwrap();
+        assert_eq!(driver.value, "in kernel 7.0.0-38-generic");
     }
 
     #[test]

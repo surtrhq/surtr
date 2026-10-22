@@ -152,6 +152,7 @@ impl NvidiaProvider {
                             device: device.clone(),
                             label: label.to_owned(),
                             source: source.clone(),
+                            limits: Default::default(),
                         };
                         (descriptor, p)
                     })

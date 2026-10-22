@@ -8,7 +8,7 @@ use std::{
 };
 
 use surtr_model::{
-    Capabilities, CpuInfo, Feature, MemoryInfo, OsInfo, Remedy, SensorDescriptor, SensorId,
+    Capabilities, CpuInfo, Feature, Limits, MemoryInfo, OsInfo, Remedy, SensorDescriptor, SensorId,
     SensorKind, SensorReading, Source, Support, SystemInfo, Timestamp,
 };
 
@@ -72,10 +72,7 @@ fn cpus() -> Vec<CpuInfo> {
         });
 
     let cpufreq = Source::new(ID, "sysfs:cpufreq");
-    let base =
-        read(format!("{CPU_DIR}/cpu0/cpufreq/base_frequency")).and_then(|t| parse::khz_to_mhz(&t));
-    let max = read(format!("{CPU_DIR}/cpu0/cpufreq/cpuinfo_max_freq"))
-        .and_then(|t| parse::khz_to_mhz(&t));
+    let (base, max) = clocks(Path::new(CPU_DIR));
 
     let topology = Source::new(ID, "sysfs:topology");
     let entry = |cores: Option<u32>, logical: Option<u32>| CpuInfo {
@@ -192,6 +189,61 @@ fn load_id(cpu: Option<u32>) -> SensorId {
 }
 
 /// One hwmon value file.
+/// A readable name for a hwmon chip whose channels have no labels, such as
+/// a network adapter (`r8169_0_100:00`), if it is a known kind.
+fn chip_title(chip: &str) -> Option<&'static str> {
+    const KNOWN: [(&str, &str); 11] = [
+        ("r8169", "Network adapter"),
+        ("r8125", "Network adapter"),
+        ("igc", "Network adapter"),
+        ("e1000e", "Network adapter"),
+        ("atlantic", "Network adapter"),
+        ("iwlwifi", "Wi-Fi adapter"),
+        ("mt79", "Wi-Fi adapter"),
+        ("ath1", "Wi-Fi adapter"),
+        ("acpitz", "ACPI thermal zone"),
+        ("nvme", "NVMe drive"),
+        ("drivetemp", "Drive"),
+    ];
+    KNOWN
+        .iter()
+        .find(|(prefix, _)| chip.starts_with(prefix))
+        .map(|(_, title)| *title)
+}
+
+/// Whether `value` can be a real reading of `kind`. Firmware fills unused
+/// channels with placeholders, such as an ACPI thermal zone stuck at 0 K
+/// (-273.2 °C).
+fn plausible(kind: SensorKind, value: f64) -> bool {
+    match kind {
+        SensorKind::Temperature => (-60.0..=250.0).contains(&value),
+        SensorKind::Fan => value >= 0.0,
+        _ => value.is_finite(),
+    }
+}
+
+/// Base and maximum clock in MHz from cpufreq under `cpu_dir` (normally
+/// `/sys/devices/system/cpu`). What `cpuinfo_max_freq` means depends on the
+/// driver: with acpi-cpufreq and boost on it is the base clock, and boost
+/// clocks aren't listed anywhere; amd-pstate has files for both; elsewhere
+/// (intel_pstate, ARM) it is the maximum.
+fn clocks(cpu_dir: &Path) -> (Option<f64>, Option<f64>) {
+    let freq = |file: &str| {
+        read(cpu_dir.join("cpu0/cpufreq").join(file)).and_then(|t| parse::khz_to_mhz(&t))
+    };
+    let driver = read(cpu_dir.join("cpu0/cpufreq/scaling_driver")).unwrap_or_default();
+    let driver = driver.trim();
+    if driver.starts_with("amd-pstate") {
+        let max = freq("amd_pstate_max_freq").or_else(|| freq("cpuinfo_max_freq"));
+        return (freq("amd_pstate_nominal_freq"), max);
+    }
+    let boost = read(cpu_dir.join("cpufreq/boost")).is_some_and(|b| b.trim() == "1");
+    if driver == "acpi-cpufreq" && boost {
+        return (freq("cpuinfo_max_freq"), None);
+    }
+    (freq("base_frequency"), freq("cpuinfo_max_freq"))
+}
+
 #[derive(Debug, Clone)]
 struct HwmonSensor {
     descriptor: SensorDescriptor,
@@ -257,7 +309,11 @@ fn scan_hwmon(root: &Path) -> Vec<HwmonSensor> {
             let label = read(dir.join(format!("{name}_label")))
                 .map(|l| l.trim().to_owned())
                 .filter(|l| !l.is_empty())
-                .unwrap_or_else(|| format!("{chip} {name}"));
+                .unwrap_or_else(|| match chip_title(&chip) {
+                    Some(title) if name == "temp1" => format!("{title} temperature"),
+                    Some(title) => format!("{title} {name}"),
+                    None => format!("{chip} {name}"),
+                });
             let mut descriptor = descriptor(
                 &format!("hwmon/{device}/{name}"),
                 channel.kind,
@@ -266,6 +322,26 @@ fn scan_hwmon(root: &Path) -> Vec<HwmonSensor> {
                 &source,
             );
             descriptor.unit = channel.unit;
+            let value = |file: &str| {
+                read(dir.join(file))
+                    .and_then(|t| t.trim().parse::<f64>().ok())
+                    .map(|v| v / channel.divisor)
+            };
+            // A channel that reads an impossible value is a placeholder, not
+            // a sensor.
+            if value(&file).is_some_and(|v| !plausible(channel.kind, v)) {
+                continue;
+            }
+            if channel.kind == SensorKind::Temperature {
+                // Some chips report 0 for a limit they don't have.
+                let limit = |suffix: &str| {
+                    value(&format!("{name}{suffix}")).filter(|v| (20.0..=250.0).contains(v))
+                };
+                descriptor.limits = Limits {
+                    high: limit("_max"),
+                    critical: limit("_crit"),
+                };
+            }
             sensors.push(HwmonSensor {
                 descriptor,
                 path: dir.join(file),
@@ -443,7 +519,8 @@ fn read_hwmon(sensors: &[HwmonSensor], at: Timestamp) -> Vec<SensorReading> {
         .filter_map(|s| {
             // Unreadable channels (EIO, ENODATA) are skipped this time.
             let raw: f64 = read(&s.path)?.trim().parse().ok()?;
-            Some(reading(s.descriptor.id.clone(), raw / s.divisor, at))
+            let value = raw / s.divisor;
+            plausible(s.descriptor.kind, value).then(|| reading(s.descriptor.id.clone(), value, at))
         })
         .collect()
 }
@@ -536,6 +613,110 @@ mod tests {
             .collect();
         // power1_input wins over power1_average.
         assert_eq!(values, [47.0, 54.25, 1200.0, 1.032]);
+    }
+
+    /// As found on a Ryzen 5 3500U mini PC (issue #68).
+    #[test]
+    fn placeholders_dropped_and_limits_kept() {
+        let fx = Fixture::new("hwmon-limits");
+        // An ACPI thermal zone stuck at 0 K.
+        fx.chip(
+            "hwmon0",
+            &[("name", "acpitz\n"), ("temp1_input", "-273200\n")],
+        );
+        // A network chip that runs hot and says so.
+        fx.chip(
+            "hwmon1",
+            &[
+                ("name", "r8169_0_100:00\n"),
+                ("temp1_input", "80500\n"),
+                ("temp1_max", "120000\n"),
+            ],
+        );
+        // A limit of 0 means "none".
+        fx.chip(
+            "hwmon2",
+            &[
+                ("name", "k10temp\n"),
+                ("temp1_input", "70000\n"),
+                ("temp1_max", "0\n"),
+                ("temp1_crit", "100000\n"),
+            ],
+        );
+        let sensors = scan_hwmon(&fx.0);
+        let ids: Vec<_> = sensors.iter().map(|s| s.descriptor.id.0.as_str()).collect();
+        assert_eq!(ids, ["hwmon/cpu0/temp1", "hwmon/r8169_0_100:00/temp1"]);
+        assert_eq!(
+            sensors[0].descriptor.limits,
+            Limits {
+                high: None,
+                critical: Some(100.0)
+            }
+        );
+        assert_eq!(sensors[1].descriptor.limits.high, Some(120.0));
+        assert_eq!(sensors[1].descriptor.label, "Network adapter temperature");
+
+        // A value that turns impossible later is skipped, not reported.
+        fs::write(fx.0.join("hwmon1/temp1_input"), "-273200\n").unwrap();
+        let ids: Vec<_> = read_hwmon(&sensors, Timestamp(0))
+            .into_iter()
+            .map(|r| r.id.0)
+            .collect();
+        assert_eq!(ids, ["hwmon/cpu0/temp1"]);
+    }
+
+    #[test]
+    fn clock_meaning_depends_on_the_driver() {
+        let fx = Fixture::new("cpufreq");
+        let set = |driver: &str, boost: &str, files: &[(&str, &str)]| {
+            let _ = fs::remove_dir_all(&fx.0);
+            fx.chip("cpufreq", &[("boost", boost)]);
+            let mut all = vec![("scaling_driver", driver)];
+            all.extend_from_slice(files);
+            fx.chip("cpu0/cpufreq", &all);
+            clocks(&fx.0)
+        };
+        // acpi-cpufreq with boost: the listed maximum is the base clock.
+        assert_eq!(
+            set(
+                "acpi-cpufreq\n",
+                "1\n",
+                &[("cpuinfo_max_freq", "2100000\n")]
+            ),
+            (Some(2100.0), None)
+        );
+        // Without boost it really is the maximum.
+        assert_eq!(
+            set(
+                "acpi-cpufreq\n",
+                "0\n",
+                &[("cpuinfo_max_freq", "2100000\n")]
+            ),
+            (None, Some(2100.0))
+        );
+        assert_eq!(
+            set(
+                "amd-pstate-epp\n",
+                "1\n",
+                &[
+                    ("amd_pstate_nominal_freq", "2100000\n"),
+                    ("amd_pstate_max_freq", "3700000\n"),
+                    ("cpuinfo_max_freq", "3700000\n"),
+                ]
+            ),
+            (Some(2100.0), Some(3700.0))
+        );
+        assert_eq!(
+            set(
+                "intel_pstate\n",
+                "1\n",
+                &[
+                    ("base_frequency", "3600000\n"),
+                    ("cpuinfo_max_freq", "5200000\n"),
+                ]
+            ),
+            (Some(3600.0), Some(5200.0))
+        );
     }
 
     #[test]

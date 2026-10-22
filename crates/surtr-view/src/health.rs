@@ -46,8 +46,23 @@ fn is_gpu(device: &str) -> bool {
         .any(|p| device.starts_with(p))
 }
 
-/// `(warn, critical)` temperature thresholds in °C for a sensor.
+/// `(warn, critical)` temperature thresholds in °C for a sensor: the limits
+/// the device reports when it reports any, else generic ones by device type.
 pub fn temperature_limits(sensor: &SensorDescriptor) -> (f64, f64) {
+    let cpu = sensor.device.starts_with("cpu");
+    // A CPU's "high" limit (coretemp's often 80 °C) sits inside normal load;
+    // only its critical limit (TjMax) is useful.
+    let high = sensor.limits.high.filter(|_| !cpu);
+    match (high, sensor.limits.critical) {
+        (Some(h), Some(c)) if h < c => (h, c),
+        (_, Some(c)) => (c - 10.0, c),
+        (Some(h), None) => (h, h + 10.0),
+        (None, None) => generic_temperature_limits(sensor),
+    }
+}
+
+/// Thresholds by device type, for sensors without limits of their own.
+fn generic_temperature_limits(sensor: &SensorDescriptor) -> (f64, f64) {
     let label = sensor.label.to_ascii_lowercase();
     if sensor.device.starts_with("cpu") {
         (85.0, 95.0)
@@ -132,6 +147,7 @@ mod tests {
             device: device.to_owned(),
             label: label.to_owned(),
             source: Source::new("test", "test"),
+            limits: Default::default(),
         }
     }
 
@@ -164,6 +180,24 @@ mod tests {
             Condition::Above(105.0),
             "hotspot keeps its own limit"
         );
+    }
+
+    #[test]
+    fn device_limits_win() {
+        let limited = |device: &str, high: Option<f64>, critical: Option<f64>| {
+            let mut s = sensor(device, SensorKind::Temperature, "temp1");
+            s.limits = surtr_model::Limits { high, critical };
+            temperature_limits(&s)
+        };
+        // A network chip that runs at 80 °C with a 120 °C limit is fine.
+        assert_eq!(limited("r8169_0_100:00", Some(120.0), None), (120.0, 130.0));
+        // An NVMe drive's own warning and critical temperatures.
+        assert_eq!(limited("nvme", Some(81.85), Some(84.85)), (81.85, 84.85));
+        // A CPU's "high" is ignored; its critical limit (TjMax) is used.
+        assert_eq!(limited("cpu0", Some(80.0), Some(100.0)), (90.0, 100.0));
+        assert_eq!(limited("cpu0", Some(80.0), None), (85.0, 95.0));
+        // A "high" above "critical" is nonsense; go by the critical one.
+        assert_eq!(limited("acpitz", Some(110.0), Some(100.0)), (90.0, 100.0));
     }
 
     #[test]

@@ -256,6 +256,7 @@ impl Store {
                     device,
                     label,
                     source: Source::new(provider, method),
+                    limits: Default::default(),
                 },
                 count: u64::try_from(count).unwrap_or(0),
                 first,
@@ -310,6 +311,7 @@ mod tests {
             device: "cpu0".to_owned(),
             label: "Package temperature".to_owned(),
             source: Source::new("mock", "synthetic"),
+            limits: Default::default(),
         }
     }
 

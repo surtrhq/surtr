@@ -166,6 +166,7 @@ mod tests {
                 device: "cpu".to_owned(),
                 label: label.to_owned(),
                 source: Source::new("t", "t"),
+                limits: Default::default(),
             },
             value: Some(1.0),
             at: None,

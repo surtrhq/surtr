@@ -18,7 +18,7 @@ mod system;
 
 pub use capability::{Capabilities, Capability, Feature, Remedy, Support};
 pub use gpu::{GpuProcess, GpuProcessKind, ThrottleReason, ThrottleState};
-pub use sensor::{SensorDescriptor, SensorId, SensorKind, SensorReading, Timestamp, Unit};
+pub use sensor::{Limits, SensorDescriptor, SensorId, SensorKind, SensorReading, Timestamp, Unit};
 pub use source::{Field, Source, Sourced};
 pub use system::{
     Arch, CpuInfo, CpuVendor, GpuInfo, GpuVendor, MemoryInfo, MemoryModule, OsInfo, SystemInfo,

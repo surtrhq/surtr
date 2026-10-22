@@ -211,6 +211,7 @@ mod tests {
                 device: "cpu0".to_owned(),
                 label: "Package temperature".to_owned(),
                 source: Source::new("test", "test"),
+                limits: Default::default(),
             },
             value: Some(value),
             at: None,
