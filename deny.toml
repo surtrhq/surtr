@@ -6,7 +6,7 @@ all-features = true
 [licenses]
 # Crates must be usable in an Apache-2.0 OR MIT project. Vendor binding crates
 # with other terms get explicit exceptions here when they arrive (plan, section 4).
-allow = ["MIT", "Apache-2.0", "Unicode-3.0", "ISC", "Zlib"]
+allow = ["MIT", "Apache-2.0", "Unicode-3.0", "ISC", "Zlib", "BSD-3-Clause"]
 confidence-threshold = 0.9
 
 [bans]
