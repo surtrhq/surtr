@@ -13,6 +13,25 @@ use surtr_model::{
 // Shared by all OS modules; each OS build uses only a subset.
 #[allow(dead_code)]
 mod parse;
+// Used by Windows and Linux; macOS reports no SMBIOS memory devices.
+#[allow(dead_code)]
+mod smbios;
+
+/// Memory modules from a raw SMBIOS table, tagged with `source`.
+#[allow(dead_code)]
+fn memory_modules(table: &[u8], source: &Source) -> Vec<surtr_model::MemoryModule> {
+    smbios::memory_devices(table)
+        .into_iter()
+        .map(|d| surtr_model::MemoryModule {
+            slot: d.slot.and_then(|v| source.tag(v)),
+            size_bytes: d.size_bytes.and_then(|v| source.tag(v)),
+            speed_mts: d.speed_mts.and_then(|v| source.tag(v)),
+            manufacturer: d.manufacturer.and_then(|v| source.tag(v)),
+            part_number: d.part_number.and_then(|v| source.tag(v)),
+            memory_type: d.memory_type.and_then(|v| source.tag(v.to_owned())),
+        })
+        .collect()
+}
 
 #[cfg(target_os = "linux")]
 mod linux;

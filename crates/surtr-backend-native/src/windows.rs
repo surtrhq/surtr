@@ -21,10 +21,11 @@ use windows_sys::Win32::{
         },
         Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW},
         SystemInformation::{
-            GetLogicalProcessorInformationEx, GlobalMemoryStatusEx, IMAGE_FILE_MACHINE,
-            IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64, IMAGE_FILE_MACHINE_I386,
-            LOGICAL_PROCESSOR_RELATIONSHIP, MEMORYSTATUSEX, RelationProcessorCore,
-            RelationProcessorPackage, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+            GetLogicalProcessorInformationEx, GetSystemFirmwareTable, GlobalMemoryStatusEx,
+            IMAGE_FILE_MACHINE, IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64,
+            IMAGE_FILE_MACHINE_I386, LOGICAL_PROCESSOR_RELATIONSHIP, MEMORYSTATUSEX,
+            RelationProcessorCore, RelationProcessorPackage,
+            SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
         },
         Threading::{
             GetActiveProcessorCount, GetActiveProcessorGroupCount, GetCurrentProcess,
@@ -158,6 +159,31 @@ pub fn process_name(pid: u32) -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
+/// The raw SMBIOS structure table, without the 8-byte `RawSMBIOSData` header.
+/// Needs no elevation.
+#[allow(unsafe_code)]
+fn smbios_table() -> Option<Vec<u8>> {
+    const RSMB: u32 = u32::from_be_bytes(*b"RSMB");
+    const HEADER: usize = 8;
+    // SAFETY: a null buffer with size 0 asks only for the size.
+    let size = unsafe { GetSystemFirmwareTable(RSMB, 0, ptr::null_mut(), 0) };
+    if size as usize <= HEADER {
+        return None;
+    }
+    let mut buf = vec![0u8; size as usize];
+    // SAFETY: `buf` has `size` writable bytes.
+    let written = unsafe { GetSystemFirmwareTable(RSMB, 0, buf.as_mut_ptr().cast(), size) };
+    if written == 0 || written > size {
+        return None;
+    }
+    buf.truncate(written as usize);
+    // RawSMBIOSData: calling method, major, minor, DMI revision (1 byte
+    // each), table length (u32), then the table.
+    let length = u32::from_le_bytes(buf.get(4..8)?.try_into().ok()?) as usize;
+    let end = (HEADER + length).min(buf.len());
+    Some(buf[HEADER..end].to_vec())
+}
+
 /// `(total, available)` physical memory visible to the OS, in bytes.
 #[allow(unsafe_code)]
 fn memory_status() -> Option<(u64, u64)> {
@@ -240,7 +266,9 @@ pub fn system_info() -> SystemInfo {
         memory: MemoryInfo {
             total_bytes: memory_status()
                 .and_then(|(total, _)| Source::new(ID, "GlobalMemoryStatusEx").tag(total)),
-            modules: Vec::new(),
+            modules: smbios_table()
+                .map(|t| crate::memory_modules(&t, &Source::new(ID, "smbios")))
+                .unwrap_or_default(),
         },
         gpus: Vec::new(),
     }
@@ -273,6 +301,24 @@ fn os_info() -> OsInfo {
     }
 }
 
+/// The maximum clock from CPUID leaf 0x16 (Intel). Hypervisors, including
+/// Windows' own virtualization-based security, often report zeros there; then
+/// the max clock stays unknown rather than falling back to the base clock.
+#[cfg(target_arch = "x86_64")]
+fn cpuid_max_mhz() -> Option<f64> {
+    use std::arch::x86_64::__cpuid;
+    if __cpuid(0).eax < 0x16 {
+        return None;
+    }
+    let mhz = __cpuid(0x16).ebx & 0xffff;
+    (mhz > 0).then(|| f64::from(mhz))
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+fn cpuid_max_mhz() -> Option<f64> {
+    None
+}
+
 fn cpus() -> Vec<CpuInfo> {
     let registry = Source::new(ID, "registry");
     let topology = Source::new(ID, "GetLogicalProcessorInformationEx");
@@ -280,6 +326,7 @@ fn cpus() -> Vec<CpuInfo> {
     let brand = reg_string(CPU_KEY, "ProcessorNameString");
     // "~MHz" is the rated speed Windows measured at boot.
     let base = reg_u32(CPU_KEY, "~MHz").filter(|&m| m > 0).map(f64::from);
+    let max = cpuid_max_mhz();
 
     let entry = |cores: Option<u32>, logical: Option<u32>| CpuInfo {
         vendor: vendor.clone().and_then(|v| registry.tag(v)),
@@ -287,7 +334,7 @@ fn cpus() -> Vec<CpuInfo> {
         physical_cores: cores.and_then(|c| topology.tag(c)),
         logical_cores: logical.and_then(|l| topology.tag(l)),
         base_clock_mhz: base.and_then(|b| registry.tag(b)),
-        max_clock_mhz: None,
+        max_clock_mhz: max.and_then(|m| Source::new(ID, "cpuid").tag(m)),
     };
 
     let cores = processor_records(RelationProcessorCore).unwrap_or_default();

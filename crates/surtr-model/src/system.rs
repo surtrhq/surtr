@@ -98,6 +98,9 @@ pub struct MemoryModule {
     pub manufacturer: Field<String>,
     /// Module part number.
     pub part_number: Field<String>,
+    /// Memory technology, for example "DDR5".
+    #[serde(default)]
+    pub memory_type: Field<String>,
 }
 
 /// One GPU.

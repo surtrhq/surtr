@@ -14,8 +14,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use surtr_model::{
     Arch, Capabilities, CpuInfo, CpuVendor, Feature, GpuInfo, GpuProcess, GpuProcessKind,
-    GpuVendor, MemoryInfo, OsInfo, SensorDescriptor, SensorId, SensorKind, SensorReading, Source,
-    Support, SystemInfo, ThrottleReason, ThrottleState, Timestamp,
+    GpuVendor, MemoryInfo, MemoryModule, OsInfo, SensorDescriptor, SensorId, SensorKind,
+    SensorReading, Source, Support, SystemInfo, ThrottleReason, ThrottleState, Timestamp,
 };
 
 use crate::{Provider, ProviderError};
@@ -110,7 +110,16 @@ impl MockProvider {
             }],
             memory: MemoryInfo {
                 total_bytes: info.tag(32 * 1024 * 1024 * 1024),
-                modules: Vec::new(),
+                modules: (0..2)
+                    .map(|i| MemoryModule {
+                        slot: info.tag(format!("DIMM_A{}", i + 1)),
+                        size_bytes: info.tag(16 * 1024 * 1024 * 1024),
+                        speed_mts: info.tag(6000),
+                        manufacturer: info.tag("Mock Memory".to_owned()),
+                        part_number: info.tag("MOCK-16G-6000".to_owned()),
+                        memory_type: info.tag("DDR5".to_owned()),
+                    })
+                    .collect(),
             },
             gpus: vec![GpuInfo {
                 device: "gpu0".to_owned(),

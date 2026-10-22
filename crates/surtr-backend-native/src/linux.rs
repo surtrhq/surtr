@@ -24,6 +24,10 @@ pub const SUPPORTED: bool = true;
 const CPU_DIR: &str = "/sys/devices/system/cpu";
 const HWMON_DIR: &str = "/sys/class/hwmon";
 
+fn read_bytes(path: impl AsRef<Path>) -> Option<Vec<u8>> {
+    fs::read(path).ok()
+}
+
 fn read(path: impl AsRef<Path>) -> Option<String> {
     fs::read_to_string(path).ok()
 }
@@ -142,7 +146,10 @@ fn meminfo(key: &str) -> Option<u64> {
 fn memory() -> MemoryInfo {
     MemoryInfo {
         total_bytes: meminfo("MemTotal").and_then(|t| Source::new(ID, "procfs:meminfo").tag(t)),
-        modules: Vec::new(),
+        // The raw table is readable by root only; others get no module list.
+        modules: read_bytes("/sys/firmware/dmi/tables/DMI")
+            .map(|t| crate::memory_modules(&t, &Source::new(ID, "smbios")))
+            .unwrap_or_default(),
     }
 }
 

@@ -102,7 +102,29 @@ pub fn system_sections(system: &SystemInfo) -> Vec<Section> {
 
     out.push(Section {
         title: "Memory".to_owned(),
-        rows: vec![Row::new("Total", bytes(&system.memory.total_bytes))],
+        rows: std::iter::once(Row::new("Total", bytes(&system.memory.total_bytes)))
+            .chain(system.memory.modules.iter().enumerate().map(|(i, m)| {
+                let value =
+                    |f: &Option<surtr_model::Sourced<String>>| f.as_ref().map(|s| s.value.clone());
+                let parts: Vec<String> = [
+                    m.size_bytes.as_ref().map(|s| format::bytes(s.value)),
+                    value(&m.memory_type),
+                    m.speed_mts.as_ref().map(|s| format!("{} MT/s", s.value)),
+                    value(&m.manufacturer),
+                    value(&m.part_number),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                let label = value(&m.slot).unwrap_or_else(|| format!("Module {i}"));
+                let cell = if parts.is_empty() {
+                    Cell::new(MISSING, Role::Missing)
+                } else {
+                    Cell::new(parts.join(" "), Role::Text)
+                };
+                Row::new(label, cell)
+            }))
+            .collect(),
     });
 
     for (i, gpu) in system.gpus.iter().enumerate() {

@@ -18,6 +18,8 @@ CPU 0
 
 Memory
   Total         32.0 GiB
+  DIMM_A1       16.0 GiB DDR5 6000 MT/s Mock Memory MOCK-16G-6000
+  DIMM_A2       16.0 GiB DDR5 6000 MT/s Mock Memory MOCK-16G-6000
 
 GPU 0
   Name          Mock GPU 16 GB
