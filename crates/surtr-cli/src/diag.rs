@@ -165,13 +165,22 @@ pub fn build(hub: &Hub) -> Bundle {
 
     let missing: Vec<String> = Feature::ALL
         .iter()
-        .filter_map(|&f| match capabilities.support(f) {
-            Some(Support::Available) => None,
-            other => Some(format!(
-                "- {}: {}",
-                format::feature(f),
-                format::support(other).0
-            )),
+        .filter_map(|&f| {
+            let entry = capabilities.get(f);
+            match entry.map(|c| &c.support) {
+                Some(Support::Available) => None,
+                other => {
+                    let fix = entry
+                        .and_then(|c| c.remedy.as_ref())
+                        .map(|r| format!(" (fix: {})", format::remedy(r)))
+                        .unwrap_or_default();
+                    Some(format!(
+                        "- {}: {}{fix}",
+                        format::feature(f),
+                        format::support(other).0
+                    ))
+                }
+            }
         })
         .collect();
     if !missing.is_empty() {

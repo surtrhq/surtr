@@ -504,13 +504,23 @@ fn draw_capabilities(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
         .into_iter()
         .skip(app.scroll)
         .map(|row| {
+            // A remedy, when there is one, goes on the line under the status.
+            let mut status = vec![Line::from(Span::styled(
+                row.cells[0].text.clone(),
+                p.style(row.cells[0].role),
+            ))];
+            if let Some(fix) = row.cells.get(1) {
+                status.push(Line::from(Span::styled(
+                    format!("→ {}", fix.text),
+                    p.style(fix.role),
+                )));
+            }
+            let height = status.len() as u16;
             Row::new(vec![
                 Cell::from(format!(" {}", row.label)),
-                Cell::from(Span::styled(
-                    row.cells[0].text.clone(),
-                    p.style(row.cells[0].role),
-                )),
+                Cell::from(status),
             ])
+            .height(height)
         })
         .collect();
     let table = Table::new(rows, [Constraint::Length(24), Constraint::Min(0)])

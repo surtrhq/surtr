@@ -84,6 +84,43 @@ pub enum Support {
     },
 }
 
+/// How the user could make an unavailable feature work. Surtr shows it and
+/// never runs it (plan, section 4 and issue #24).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Remedy {
+    /// What to do, as one sentence.
+    pub text: String,
+    /// A command to copy, if there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// An official page with more information or the download.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+impl Remedy {
+    /// A remedy with only a description.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            command: None,
+            url: None,
+        }
+    }
+
+    /// Adds a command to copy.
+    pub fn command(mut self, command: impl Into<String>) -> Self {
+        self.command = Some(command.into());
+        self
+    }
+
+    /// Adds a link.
+    pub fn url(mut self, url: impl Into<String>) -> Self {
+        self.url = Some(url.into());
+        self
+    }
+}
+
 /// One feature and its support status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Capability {
@@ -91,6 +128,9 @@ pub struct Capability {
     pub feature: Feature,
     /// Its status.
     pub support: Support,
+    /// How to make it work, when Surtr knows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remedy: Option<Remedy>,
 }
 
 /// What a provider can and cannot do on this machine.
@@ -101,17 +141,31 @@ pub struct Capabilities(pub Vec<Capability>);
 impl Capabilities {
     /// Status of `feature`, or `None` if the provider doesn't mention it.
     pub fn support(&self, feature: Feature) -> Option<&Support> {
-        self.0
-            .iter()
-            .find(|c| c.feature == feature)
-            .map(|c| &c.support)
+        self.get(feature).map(|c| &c.support)
     }
 
-    /// Adds or replaces the status of `feature`.
+    /// The whole entry for `feature`.
+    pub fn get(&self, feature: Feature) -> Option<&Capability> {
+        self.0.iter().find(|c| c.feature == feature)
+    }
+
+    /// Adds or replaces the status of `feature`, without a remedy.
     pub fn set(&mut self, feature: Feature, support: Support) {
+        self.set_with(feature, support, None);
+    }
+
+    /// Adds or replaces the status of `feature` and its remedy.
+    pub fn set_with(&mut self, feature: Feature, support: Support, remedy: Option<Remedy>) {
         match self.0.iter_mut().find(|c| c.feature == feature) {
-            Some(c) => c.support = support,
-            None => self.0.push(Capability { feature, support }),
+            Some(c) => {
+                c.support = support;
+                c.remedy = remedy;
+            }
+            None => self.0.push(Capability {
+                feature,
+                support,
+                remedy,
+            }),
         }
     }
 }

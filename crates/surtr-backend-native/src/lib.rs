@@ -58,6 +58,10 @@ mod platform {
         SystemInfo::default()
     }
 
+    pub fn display_adapters() -> Vec<crate::DisplayAdapter> {
+        Vec::new()
+    }
+
     pub fn process_name(_pid: u32) -> Option<String> {
         None
     }
@@ -101,6 +105,28 @@ fn descriptor(
 #[allow(dead_code)]
 fn reading(id: SensorId, value: f64, at: Timestamp) -> SensorReading {
     SensorReading { id, value, at }
+}
+
+/// A display adapter the OS knows about, whether or not a GPU backend
+/// supports it. Used to tell which GPU driver a user is missing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisplayAdapter {
+    /// PCI vendor id: 0x10de NVIDIA, 0x1002 AMD, 0x8086 Intel, ...
+    pub vendor_id: u16,
+    /// The OS's name for it, when available.
+    pub name: Option<String>,
+}
+
+/// PCI vendor id of NVIDIA.
+pub const NVIDIA: u16 = 0x10de;
+/// PCI vendor id of AMD (ATI).
+pub const AMD: u16 = 0x1002;
+/// PCI vendor id of Intel.
+pub const INTEL: u16 = 0x8086;
+
+/// Display adapters present in this machine.
+pub fn display_adapters() -> Vec<DisplayAdapter> {
+    platform::display_adapters()
 }
 
 /// The executable name (without its path) of process `pid`, if the OS lets

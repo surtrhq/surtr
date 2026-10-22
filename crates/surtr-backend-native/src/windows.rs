@@ -12,6 +12,11 @@ use surtr_model::{
     SensorKind, SensorReading, Source, Support, SystemInfo, Timestamp,
 };
 use windows_sys::Win32::{
+    Devices::DeviceAndDriverInstallation::{
+        DIGCF_PRESENT, GUID_DEVCLASS_DISPLAY, SP_DEVINFO_DATA, SPDRP_DEVICEDESC, SPDRP_HARDWAREID,
+        SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW,
+        SetupDiGetDeviceRegistryPropertyW,
+    },
     Foundation::{CloseHandle, ERROR_SUCCESS},
     System::{
         Performance::{
@@ -132,6 +137,63 @@ fn native_arch() -> Option<Arch> {
         IMAGE_FILE_MACHINE_I386 => Arch::Other("x86".to_owned()),
         other => Arch::Other(format!("machine 0x{other:04x}")),
     })
+}
+
+/// Display adapters from the Setup API (works without elevation).
+#[allow(unsafe_code)]
+pub fn display_adapters() -> Vec<crate::DisplayAdapter> {
+    // SAFETY: a valid class GUID pointer; null enumerator and window.
+    let set = unsafe {
+        SetupDiGetClassDevsW(
+            &GUID_DEVCLASS_DISPLAY,
+            ptr::null(),
+            ptr::null_mut(),
+            DIGCF_PRESENT,
+        )
+    };
+    if set == -1 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for index in 0u32.. {
+        let mut data = SP_DEVINFO_DATA {
+            cbSize: mem::size_of::<SP_DEVINFO_DATA>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: `set` is open and `data` has its size set.
+        if unsafe { SetupDiEnumDeviceInfo(set, index, &mut data) } == 0 {
+            break;
+        }
+        let property = |property| {
+            let mut buf = [0u16; 512];
+            let mut needed = 0u32;
+            // SAFETY: `buf` is writable for the byte size passed.
+            let ok = unsafe {
+                SetupDiGetDeviceRegistryPropertyW(
+                    set,
+                    &data,
+                    property,
+                    ptr::null_mut(),
+                    buf.as_mut_ptr().cast(),
+                    (buf.len() * 2) as u32,
+                    &mut needed,
+                )
+            };
+            // For multi-string properties the first string is enough.
+            let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+            (ok != 0 && len > 0).then(|| String::from_utf16_lossy(&buf[..len]))
+        };
+        let Some(vendor_id) = property(SPDRP_HARDWAREID).and_then(|h| parse::pci_vendor(&h)) else {
+            continue;
+        };
+        out.push(crate::DisplayAdapter {
+            vendor_id,
+            name: property(SPDRP_DEVICEDESC),
+        });
+    }
+    // SAFETY: `set` is open and destroyed once.
+    unsafe { SetupDiDestroyDeviceInfoList(set) };
+    out
 }
 
 /// The executable file name of process `pid`. Needs only limited query

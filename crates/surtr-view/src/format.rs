@@ -1,7 +1,7 @@
 //! Text for values and names, shared by every front end.
 
 use surtr_model::{
-    Arch, CpuVendor, Feature, GpuProcessKind, GpuVendor, Support, ThrottleReason, Unit,
+    Arch, CpuVendor, Feature, GpuProcessKind, GpuVendor, Remedy, Support, ThrottleReason, Unit,
 };
 
 use crate::Role;
@@ -99,6 +99,15 @@ pub fn support(support: Option<&Support>) -> (String, Role) {
         Some(Support::NoHardware) => ("no hardware".to_owned(), Role::Muted),
         Some(Support::Unsupported { reason }) => (format!("unsupported ({reason})"), Role::Missing),
         None => ("unknown".to_owned(), Role::Missing),
+    }
+}
+
+/// A remedy as one line: what to do, then the command or link.
+pub fn remedy(r: &Remedy) -> String {
+    match (&r.command, &r.url) {
+        (Some(c), _) => format!("{}: {c}", r.text),
+        (None, Some(u)) => format!("{}: {u}", r.text),
+        (None, None) => r.text.clone(),
     }
 }
 

@@ -72,6 +72,14 @@ pub fn caps(provider: &str, capabilities: &Capabilities) -> String {
             row.label,
             paint(row.cells[0].role, &row.cells[0].text)
         );
+        if let Some(fix) = row.cells.get(1) {
+            let _ = writeln!(
+                out,
+                "{:<22}{}",
+                "",
+                paint(fix.role, &format!("→ {}", fix.text))
+            );
+        }
     }
     footer(&mut out, &format!("Providers: {provider}."));
     out
@@ -280,6 +288,29 @@ mod tests {
         assert!(out.contains("GPU 0"));
         assert!(
             out.ends_with("Providers: mock. Run with --json to see where each value came from.\n")
+        );
+    }
+
+    #[test]
+    fn caps_show_remedies_under_the_status() {
+        let mut capabilities = Capabilities::default();
+        capabilities.set_with(
+            Feature::CpuTemperature,
+            surtr_model::Support::Unsupported {
+                reason: "no driver".into(),
+            },
+            Some(
+                surtr_model::Remedy::new("Load the coretemp kernel module")
+                    .command("sudo modprobe coretemp"),
+            ),
+        );
+        let out = caps("test", &capabilities);
+        assert!(
+            out.contains(&format!(
+                "CPU temperature       unsupported (no driver)\n{:<22}→ Load the coretemp kernel module: sudo modprobe coretemp\n",
+                ""
+            )),
+            "{out}"
         );
     }
 

@@ -16,7 +16,7 @@ mod sensor;
 mod source;
 mod system;
 
-pub use capability::{Capabilities, Capability, Feature, Support};
+pub use capability::{Capabilities, Capability, Feature, Remedy, Support};
 pub use gpu::{GpuProcess, GpuProcessKind, ThrottleReason, ThrottleState};
 pub use sensor::{SensorDescriptor, SensorId, SensorKind, SensorReading, Timestamp, Unit};
 pub use source::{Field, Source, Sourced};

@@ -8,8 +8,8 @@ use std::{
 };
 
 use surtr_model::{
-    Capabilities, CpuInfo, Feature, MemoryInfo, OsInfo, SensorDescriptor, SensorId, SensorKind,
-    SensorReading, Source, Support, SystemInfo, Timestamp,
+    Capabilities, CpuInfo, Feature, MemoryInfo, OsInfo, Remedy, SensorDescriptor, SensorId,
+    SensorKind, SensorReading, Source, Support, SystemInfo, Timestamp,
 };
 
 use crate::{
@@ -104,6 +104,33 @@ fn cpus() -> Vec<CpuInfo> {
             entry(cores, Some(logical))
         })
         .collect()
+}
+
+/// PCI display controllers (class 0x03xxxx) from sysfs.
+pub fn display_adapters() -> Vec<crate::DisplayAdapter> {
+    display_adapters_in(Path::new("/sys/bus/pci/devices"))
+}
+
+fn display_adapters_in(root: &Path) -> Vec<crate::DisplayAdapter> {
+    let mut out: Vec<crate::DisplayAdapter> = fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let dir = e.path();
+            let class = read(dir.join("class")).and_then(|c| parse::hex_id(&c))?;
+            if class >> 16 != 0x03 {
+                return None;
+            }
+            let vendor = read(dir.join("vendor")).and_then(|v| parse::hex_id(&v))?;
+            Some(crate::DisplayAdapter {
+                vendor_id: u16::try_from(vendor).ok()?,
+                name: None,
+            })
+        })
+        .collect();
+    out.sort_by_key(|a| a.vendor_id);
+    out
 }
 
 pub fn process_name(pid: u32) -> Option<String> {
@@ -289,18 +316,42 @@ impl State {
                 .iter()
                 .any(|s| s.cpu == cpu && s.descriptor.kind == kind)
         };
-        caps.set(
-            Feature::CpuTemperature,
-            if has(true, SensorKind::Temperature) {
-                Support::Available
-            } else {
+        if has(true, SensorKind::Temperature) {
+            caps.set(Feature::CpuTemperature, Support::Available);
+        } else {
+            // The kernel driver for this CPU family, if Surtr knows it.
+            let vendor = read("/proc/cpuinfo")
+                .and_then(|t| parse::cpuinfo_value(&t, "vendor_id"))
+                .map(|v| parse::cpu_vendor(&v));
+            let module = match vendor {
+                Some(surtr_model::CpuVendor::Intel) => Some("coretemp"),
+                Some(surtr_model::CpuVendor::Amd) => Some("k10temp"),
+                _ => None,
+            };
+            caps.set_with(
+                Feature::CpuTemperature,
                 Support::Unsupported {
                     reason: "no CPU temperature driver (coretemp, k10temp) found".to_owned(),
-                }
-            },
-        );
+                },
+                module.map(|m| {
+                    Remedy::new(format!("Load the {m} kernel module"))
+                        .command(format!("sudo modprobe {m}"))
+                }),
+            );
+        }
         if has(false, SensorKind::Fan) || has(false, SensorKind::Voltage) {
             caps.set(Feature::BoardSensors, Support::Available);
+        } else {
+            caps.set_with(
+                Feature::BoardSensors,
+                Support::Unsupported {
+                    reason: "no motherboard sensor driver loaded".to_owned(),
+                },
+                Some(
+                    Remedy::new("Let lm-sensors detect and load the motherboard sensor driver")
+                        .command("sudo sensors-detect"),
+                ),
+            );
         }
     }
 

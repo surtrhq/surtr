@@ -6,6 +6,10 @@
 
 use serde::Serialize;
 use surtr_backend::{Provider, ProviderError};
+use surtr_model::{
+    Capabilities, Capability, Feature, GpuProcess, Remedy, SensorDescriptor, Support, SystemInfo,
+    ThrottleState, Timestamp,
+};
 
 pub mod paths;
 
@@ -19,10 +23,6 @@ fn logged<T>(p: &dyn Provider, what: &str, result: Result<T, ProviderError>) -> 
         }
     }
 }
-use surtr_model::{
-    Capabilities, Feature, GpuProcess, SensorDescriptor, Support, SystemInfo, ThrottleState,
-    Timestamp,
-};
 
 /// One sensor with its latest value. `value` is absent when the sensor
 /// couldn't be read this time.
@@ -46,7 +46,7 @@ pub struct Sample {
 #[derive(Default)]
 pub struct Hub {
     providers: Vec<Box<dyn Provider>>,
-    missing: Vec<(Vec<Feature>, String)>,
+    missing: Vec<(Vec<Feature>, String, Option<Remedy>)>,
 }
 
 impl std::fmt::Debug for Hub {
@@ -82,8 +82,14 @@ impl Hub {
 
     /// Records that a backend which would have provided `features` couldn't
     /// start, so [`Hub::capabilities`] can say why they are missing.
-    pub fn add_missing(&mut self, features: &[Feature], reason: impl Into<String>) {
-        self.missing.push((features.to_vec(), reason.into()));
+    pub fn add_missing(
+        &mut self,
+        features: &[Feature],
+        reason: impl Into<String>,
+        remedy: Option<Remedy>,
+    ) {
+        self.missing
+            .push((features.to_vec(), reason.into(), remedy));
     }
 
     /// Ids of the providers, in the order added.
@@ -119,23 +125,34 @@ impl Hub {
     /// another provider does better.
     pub fn capabilities(&self) -> Capabilities {
         let mut out = Capabilities::default();
-        let mut offer = |feature: Feature, support: Support| match out.support(feature) {
-            Some(current) if rank(current) >= rank(&support) => {}
-            _ => out.set(feature, support),
+        // A better status wins; at equal status, an entry with a remedy beats
+        // one without.
+        let mut offer = |c: Capability| {
+            let better = match out.get(c.feature) {
+                None => true,
+                Some(current) => {
+                    let (new, old) = (rank(&c.support), rank(&current.support));
+                    new > old || (new == old && current.remedy.is_none() && c.remedy.is_some())
+                }
+            };
+            if better {
+                out.set_with(c.feature, c.support, c.remedy);
+            }
         };
         for caps in self.providers.iter().map(|p| p.capabilities()) {
             for c in caps.0 {
-                offer(c.feature, c.support);
+                offer(c);
             }
         }
-        for (features, reason) in &self.missing {
+        for (features, reason, remedy) in &self.missing {
             for &feature in features {
-                offer(
+                offer(Capability {
                     feature,
-                    Support::Unsupported {
+                    support: Support::Unsupported {
                         reason: reason.clone(),
                     },
-                );
+                    remedy: remedy.clone(),
+                });
             }
         }
         out
@@ -249,8 +266,21 @@ mod tests {
         hub.add_missing(
             &[Feature::GpuIdentity, Feature::GpuTuning],
             "no AMD library",
+            Some(Remedy::new("Install the AMD driver").url("https://example.invalid")),
         );
         let caps = hub.capabilities();
+        // Available beats a missing backend; the remedy only shows where the
+        // missing backend's status is the best there is.
+        assert!(caps.get(Feature::GpuIdentity).unwrap().remedy.is_none());
+        assert_eq!(
+            caps.get(Feature::GpuTuning)
+                .unwrap()
+                .remedy
+                .as_ref()
+                .unwrap()
+                .text,
+            "Install the AMD driver"
+        );
         assert_eq!(
             caps.support(Feature::CpuTemperature),
             Some(&Support::Available)

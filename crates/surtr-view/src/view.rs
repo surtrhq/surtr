@@ -143,12 +143,19 @@ pub fn system_sections(system: &SystemInfo) -> Vec<Section> {
 
 /// Every feature with its support status, including ones no provider
 /// mentions.
+/// A second cell holds the remedy, when there is one.
 pub fn capability_rows(capabilities: &Capabilities) -> Vec<Row> {
     Feature::ALL
         .iter()
         .map(|&feature| {
-            let (text, role) = format::support(capabilities.support(feature));
-            Row::new(format::feature(feature), Cell::new(text, role))
+            let entry = capabilities.get(feature);
+            let (text, role) = format::support(entry.map(|c| &c.support));
+            let mut row = Row::new(format::feature(feature), Cell::new(text, role));
+            if let Some(remedy) = entry.and_then(|c| c.remedy.as_ref()) {
+                row.cells
+                    .push(Cell::new(format::remedy(remedy), Role::Accent));
+            }
+            row
         })
         .collect()
 }

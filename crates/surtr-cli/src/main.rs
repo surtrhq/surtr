@@ -9,10 +9,10 @@ use clap::{CommandFactory, Parser, Subcommand};
 use serde_json::json;
 use surtr_backend::{Provider, ProviderError, mock::MockProvider};
 use surtr_backend_amd::AmdProvider;
-use surtr_backend_native::{NativeProvider, process_name};
+use surtr_backend_native::{AMD, INTEL, NVIDIA, NativeProvider, process_name};
 use surtr_backend_nvidia::NvidiaProvider;
 use surtr_core::Hub;
-use surtr_model::{Feature, SensorId, Timestamp};
+use surtr_model::{Feature, Remedy, SensorId, Timestamp};
 use surtr_store::Store;
 
 mod diag;
@@ -163,6 +163,22 @@ const GPU_FEATURES: [Feature; 5] = [
     Feature::GpuTuning,
 ];
 
+/// How to get a GPU backend working when its GPU is present. Only official
+/// vendor pages; Surtr never installs drivers itself (#24).
+fn gpu_remedy(vendor: u16) -> Option<Remedy> {
+    match vendor {
+        NVIDIA => Some(
+            Remedy::new("Install or repair the NVIDIA driver; NVML comes with it")
+                .url("https://www.nvidia.com/drivers"),
+        ),
+        AMD if cfg!(target_os = "linux") => {
+            Some(Remedy::new("Load the amdgpu kernel driver").command("sudo modprobe amdgpu"))
+        }
+        // AMD on Windows needs the ADLX backend, which doesn't exist yet.
+        _ => None,
+    }
+}
+
 fn reason(err: ProviderError) -> String {
     match err {
         ProviderError::Unavailable { reason } => reason,
@@ -179,23 +195,46 @@ fn hub(mock: bool) -> Result<Hub, String> {
         return Ok(hub);
     }
     hub.add(Box::new(NativeProvider::new().map_err(reason)?));
+    // Which GPUs the OS sees decides how to explain a backend that can't
+    // start: a missing driver for a GPU that is there, or no GPU of that kind.
+    let adapters = surtr_backend_native::display_adapters();
+    let present = |vendor: u16| adapters.iter().any(|a| a.vendor_id == vendor);
     type Started = Result<Box<dyn Provider>, ProviderError>;
-    let gpus: [(&str, Started); 2] = [
-        ("NVIDIA", NvidiaProvider::new().map(|p| Box::new(p) as _)),
-        ("AMD", AmdProvider::new().map(|p| Box::new(p) as _)),
+    let gpus: [(&str, u16, Started); 2] = [
+        (
+            "NVIDIA",
+            NVIDIA,
+            NvidiaProvider::new().map(|p| Box::new(p) as _),
+        ),
+        ("AMD", AMD, AmdProvider::new().map(|p| Box::new(p) as _)),
     ];
+    let mut started = 0;
+    let mut explained = false;
     let mut why_not = Vec::new();
-    for (vendor, result) in gpus {
+    for (vendor, id, result) in gpus {
         match result {
-            Ok(provider) => hub.add(provider),
+            Ok(provider) => {
+                hub.add(provider);
+                started += 1;
+            }
+            Err(err) if present(id) => {
+                hub.add_missing(
+                    &GPU_FEATURES,
+                    format!("{vendor} GPU found, but {}", reason(err)),
+                    gpu_remedy(id),
+                );
+                explained = true;
+            }
             Err(err) => why_not.push(format!("{vendor}: {}", reason(err))),
         }
     }
-    if why_not.len() == 2 {
-        hub.add_missing(
-            &GPU_FEATURES,
-            format!("no supported GPU found ({})", why_not.join("; ")),
-        );
+    if started == 0 && !explained {
+        let text = if present(INTEL) {
+            "Intel GPUs have no Surtr backend yet".to_owned()
+        } else {
+            format!("no supported GPU found ({})", why_not.join("; "))
+        };
+        hub.add_missing(&GPU_FEATURES, text, None);
     }
     Ok(hub)
 }

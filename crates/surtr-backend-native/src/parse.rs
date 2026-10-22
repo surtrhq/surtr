@@ -246,6 +246,19 @@ pub fn hwmon_channel(file: &str) -> Option<HwmonChannel> {
     None
 }
 
+/// The PCI vendor id in a Windows hardware id such as
+/// `PCI\VEN_10DE&DEV_25B9&SUBSYS_0A821028`.
+pub fn pci_vendor(hardware_id: &str) -> Option<u16> {
+    let upper = hardware_id.to_ascii_uppercase();
+    let start = upper.find("VEN_")? + 4;
+    u16::from_str_radix(upper.get(start..start + 4)?, 16).ok()
+}
+
+/// A hex id from sysfs such as `0x10de`.
+pub fn hex_id(text: &str) -> Option<u32> {
+    u32::from_str_radix(text.trim().trim_start_matches("0x"), 16).ok()
+}
+
 /// A Windows PDH "Processor Information" instance name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PdhInstance {
@@ -444,6 +457,18 @@ mod tests {
         assert_eq!(hwmon_channel("temp1_max"), None);
         assert_eq!(hwmon_channel("intrusion0_alarm"), None);
         assert_eq!(hwmon_channel("name"), None);
+    }
+
+    #[test]
+    fn pci_ids() {
+        assert_eq!(
+            pci_vendor(r"PCI\VEN_10DE&DEV_25B9&SUBSYS_0A821028&REV_A1"),
+            Some(0x10de)
+        );
+        assert_eq!(pci_vendor(r"pci\ven_8086&dev_46a6"), Some(0x8086));
+        assert_eq!(pci_vendor(r"ROOT\BasicDisplay"), None);
+        assert_eq!(hex_id("0x030000\n"), Some(0x030000));
+        assert_eq!(hex_id("zz"), None);
     }
 
     #[test]

@@ -136,3 +136,8 @@ pub fn process_name(pid: u32) -> Option<String> {
     let len = usize::try_from(len).ok().filter(|&n| n > 0)?;
     Some(String::from_utf8_lossy(&buf[..len]).into_owned())
 }
+
+/// Not detected on macOS yet.
+pub fn display_adapters() -> Vec<crate::DisplayAdapter> {
+    Vec::new()
+}
