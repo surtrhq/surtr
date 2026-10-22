@@ -17,7 +17,7 @@ use windows_sys::Win32::{
         SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW,
         SetupDiGetDeviceRegistryPropertyW,
     },
-    Foundation::{CloseHandle, ERROR_SUCCESS},
+    Foundation::{CloseHandle, ERROR_SUCCESS, FILETIME},
     System::{
         Performance::{
             PDH_CSTATUS_NEW_DATA, PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE_ITEM_W,
@@ -34,15 +34,15 @@ use windows_sys::Win32::{
         },
         Threading::{
             GetActiveProcessorCount, GetActiveProcessorGroupCount, GetCurrentProcess,
-            IsWow64Process2, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-            QueryFullProcessImageNameW,
+            GetSystemTimes, IsWow64Process2, OpenProcess, PROCESS_NAME_WIN32,
+            PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
         },
     },
 };
 
 use crate::{
     descriptor,
-    parse::{self, GroupMasks, PdhInstance},
+    parse::{self, CpuTimes, GroupMasks, PdhInstance},
     reading,
 };
 
@@ -564,12 +564,37 @@ fn group_offsets() -> Vec<u32> {
     offsets
 }
 
-/// Sensor state: the PDH query (if the counters exist) and the processor
-/// group layout used to number threads.
+/// System-wide busy and total CPU time from `GetSystemTimes`, in 100 ns
+/// units. Unlike PDH's per-sample `% Processor Time`, this never comes back
+/// invalid, so it is used for the total load (#10).
+#[allow(unsafe_code)]
+fn system_times() -> Option<CpuTimes> {
+    let ticks = |t: FILETIME| u64::from(t.dwHighDateTime) << 32 | u64::from(t.dwLowDateTime);
+    let (mut idle, mut kernel, mut user) = (
+        FILETIME::default(),
+        FILETIME::default(),
+        FILETIME::default(),
+    );
+    // SAFETY: all three out-pointers refer to live locals.
+    let ok = unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) };
+    if ok == 0 {
+        return None;
+    }
+    // Kernel time includes idle time.
+    let total = ticks(kernel) + ticks(user);
+    Some(CpuTimes {
+        busy: total.saturating_sub(ticks(idle)),
+        total,
+    })
+}
+
+/// Sensor state: the PDH query (if the counters exist), the processor group
+/// layout used to number threads, and the previous system-time sample.
 #[derive(Debug)]
 pub struct State {
     pdh: Option<Mutex<Pdh>>,
     offsets: Vec<u32>,
+    prev_times: Mutex<Option<CpuTimes>>,
 }
 
 impl State {
@@ -577,6 +602,8 @@ impl State {
         Self {
             pdh: Pdh::open().map(Mutex::new),
             offsets: group_offsets(),
+            // Prime it so the first read has something to compare with.
+            prev_times: Mutex::new(system_times()),
         }
     }
 
@@ -591,8 +618,8 @@ impl State {
     }
 
     pub fn capabilities(&self, caps: &mut Capabilities) {
+        caps.set(Feature::CpuLoad, Support::Available);
         if self.pdh.is_some() {
-            caps.set(Feature::CpuLoad, Support::Available);
             caps.set(Feature::CpuClock, Support::Available);
         }
         // Without a driver Windows exposes none of these (plan, section 4).
@@ -611,15 +638,14 @@ impl State {
 
     pub fn sensors(&self) -> Vec<SensorDescriptor> {
         let pdh = Source::new(ID, "pdh");
-        let mut out = Vec::new();
+        let mut out = vec![descriptor(
+            "cpu/load",
+            SensorKind::Load,
+            "cpu",
+            "Total load",
+            &Source::new(ID, "GetSystemTimes"),
+        )];
         if self.pdh.is_some() {
-            out.push(descriptor(
-                "cpu/load",
-                SensorKind::Load,
-                "cpu",
-                "Total load",
-                &pdh,
-            ));
             out.push(descriptor(
                 "cpu/clock",
                 SensorKind::Clock,
@@ -671,14 +697,27 @@ impl State {
         let at = Timestamp::now();
         let mut out = Vec::new();
 
+        if let Some(cur) = system_times() {
+            let mut prev = self
+                .prev_times
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if let Some(load) = prev.and_then(|p| parse::load_percent(p, cur)) {
+                out.push(reading(SensorId::new("cpu/load"), load, at));
+            }
+            *prev = Some(cur);
+        }
+
         if let Some(pdh) = &self.pdh {
             let pdh = pdh.lock().unwrap_or_else(PoisonError::into_inner);
             if pdh.collect() {
                 let load = pdh.values(pdh.load, PDH_FMT_DOUBLE);
                 let perf = pdh.values(pdh.perf, PDH_FMT_DOUBLE | PDH_FMT_NOCAP100);
                 let freq = pdh.values(pdh.freq, PDH_FMT_DOUBLE);
+                // The total comes from GetSystemTimes above.
                 let mut loads: Vec<_> = load
                     .into_iter()
+                    .filter(|(i, _)| *i != PdhInstance::Total)
                     .filter_map(|(i, v)| Some((self.id(i, "load")?, v)))
                     .collect();
                 // Effective clock estimate: nominal frequency times the
