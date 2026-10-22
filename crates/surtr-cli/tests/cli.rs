@@ -98,12 +98,12 @@ fn mock_sensors_json() {
     assert!(temp["value"].is_f64());
 }
 
-// On Windows and Linux the total CPU load must be readable without a driver.
+// On Windows, Linux and macOS the total CPU load must be readable without a driver.
 // The OS may mark a single sample invalid (Surtr then leaves it out), so a
 // few attempts are allowed; a load that never appears still fails.
 #[test]
 fn native_sensors_json() {
-    if !cfg!(any(windows, target_os = "linux")) {
+    if !cfg!(any(windows, target_os = "linux", target_os = "macos")) {
         return;
     }
     let mut last = Value::Null;

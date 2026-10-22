@@ -235,7 +235,7 @@ mod tests {
         assert!(!name.contains(['/', '\\']), "{name}");
     }
 
-    // Every reading must belong to a declared sensor, and on Windows and Linux
+    // Every reading must belong to a declared sensor, and on Windows, Linux and macOS
     // the total CPU load must show up once two samples exist. The OS may mark
     // a single sample invalid (it is then left out), so a few reads are
     // allowed before the load must appear.
@@ -264,7 +264,7 @@ mod tests {
                 break;
             }
         }
-        if cfg!(any(windows, target_os = "linux")) {
+        if cfg!(any(windows, target_os = "linux", target_os = "macos")) {
             let load = load.expect("no total CPU load in 3 reads");
             assert!((0.0..=100.0).contains(&load), "load {load}");
         }

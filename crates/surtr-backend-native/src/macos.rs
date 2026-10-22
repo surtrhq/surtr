@@ -1,10 +1,21 @@
-//! macOS: `sysctl` values, no root needed.
+//! macOS: `sysctl` values and mach host statistics, no root needed.
 
-use std::{ffi::CString, ptr};
+use std::{
+    ffi::CString,
+    mem, ptr, slice,
+    sync::{Mutex, PoisonError},
+};
 
-use surtr_model::{Arch, CpuInfo, CpuVendor, MemoryInfo, OsInfo, Source, SystemInfo};
+use surtr_model::{
+    Arch, Capabilities, CpuInfo, CpuVendor, Feature, MemoryInfo, OsInfo, SensorDescriptor,
+    SensorId, SensorKind, SensorReading, Source, Support, SystemInfo, Timestamp,
+};
 
-use crate::parse;
+use crate::{
+    descriptor,
+    parse::{self, CpuTimes},
+    reading,
+};
 
 pub const ID: &str = "macos";
 pub const SUPPORTED: bool = true;
@@ -107,23 +118,168 @@ pub fn system_info() -> SystemInfo {
     }
 }
 
-/// No live sensors on macOS yet (best-effort platform, plan section 3).
+/// Busy and total ticks per logical CPU from `host_processor_info`.
+// mach_host_self and mach_task_self are deprecated in libc in favor of the
+// mach2 crate, but they are the documented system calls.
+#[allow(unsafe_code, deprecated)]
+fn cpu_ticks() -> Option<Vec<CpuTimes>> {
+    let mut cpus: libc::natural_t = 0;
+    let mut info: libc::processor_info_array_t = ptr::null_mut();
+    let mut len: libc::mach_msg_type_number_t = 0;
+    // SAFETY: all out-pointers refer to locals; the kernel allocates `info`.
+    let kr = unsafe {
+        libc::host_processor_info(
+            libc::mach_host_self(),
+            libc::PROCESSOR_CPU_LOAD_INFO,
+            &mut cpus,
+            &mut info,
+            &mut len,
+        )
+    };
+    if kr != libc::KERN_SUCCESS || info.is_null() {
+        return None;
+    }
+    // SAFETY: on success `info` holds `len` integers, 4 per CPU (user,
+    // system, idle, nice).
+    let ticks = unsafe { slice::from_raw_parts(info, len as usize) };
+    let out = ticks
+        .chunks_exact(4)
+        .take(cpus as usize)
+        .map(|t| {
+            let tick = |i: usize| u64::from(t[i] as u32);
+            let busy = tick(0) + tick(1) + tick(3);
+            CpuTimes {
+                busy,
+                total: busy + tick(2),
+            }
+        })
+        .collect();
+    // SAFETY: `info` was allocated by the kernel for this task with `len`
+    // integers and is freed exactly once.
+    unsafe {
+        libc::vm_deallocate(
+            libc::mach_task_self(),
+            info as libc::vm_address_t,
+            len as libc::vm_size_t * mem::size_of::<libc::integer_t>() as libc::vm_size_t,
+        )
+    };
+    Some(out)
+}
+
+/// Memory in use the way Activity Monitor counts it: app memory (internal
+/// minus purgeable pages) plus wired plus compressed.
+#[allow(unsafe_code, deprecated)]
+fn memory_used() -> Option<u64> {
+    // SAFETY: vm_statistics64 is plain data; all-zero is valid.
+    let mut stats: libc::vm_statistics64 = unsafe { mem::zeroed() };
+    let mut count = libc::HOST_VM_INFO64_COUNT;
+    // SAFETY: `stats` has room for `count` integers.
+    let kr = unsafe {
+        libc::host_statistics64(
+            libc::mach_host_self(),
+            libc::HOST_VM_INFO64,
+            (&raw mut stats).cast(),
+            &mut count,
+        )
+    };
+    if kr != libc::KERN_SUCCESS {
+        return None;
+    }
+    let page = sysctl_u64("hw.pagesize")?;
+    let (internal, purgeable, wired, compressed) = (
+        stats.internal_page_count,
+        stats.purgeable_count,
+        stats.wire_count,
+        stats.compressor_page_count,
+    );
+    let pages = u64::from(internal).saturating_sub(u64::from(purgeable))
+        + u64::from(wired)
+        + u64::from(compressed);
+    Some(pages * page)
+}
+
+/// Sensor state: the previous tick sample per CPU, for loads.
 #[derive(Debug)]
-pub struct State;
+pub struct State {
+    prev: Mutex<Vec<CpuTimes>>,
+    threads: usize,
+}
 
 impl State {
     pub fn new() -> Self {
-        Self
+        let prev = cpu_ticks().unwrap_or_default();
+        Self {
+            threads: prev.len(),
+            prev: Mutex::new(prev),
+        }
     }
 
-    pub fn capabilities(&self, _caps: &mut surtr_model::Capabilities) {}
-
-    pub fn sensors(&self) -> Vec<surtr_model::SensorDescriptor> {
-        Vec::new()
+    pub fn capabilities(&self, caps: &mut Capabilities) {
+        if self.threads > 0 {
+            caps.set(Feature::CpuLoad, Support::Available);
+        }
     }
 
-    pub fn read(&self) -> Vec<surtr_model::SensorReading> {
-        Vec::new()
+    pub fn sensors(&self) -> Vec<SensorDescriptor> {
+        let src = Source::new(ID, "host_processor_info");
+        let mut out = Vec::new();
+        if self.threads > 0 {
+            out.push(descriptor(
+                "cpu/load",
+                SensorKind::Load,
+                "cpu",
+                "Total load",
+                &src,
+            ));
+            for n in 0..self.threads {
+                out.push(descriptor(
+                    &format!("cpu/thread{n}/load"),
+                    SensorKind::Load,
+                    "cpu",
+                    &format!("Thread {n} load"),
+                    &src,
+                ));
+            }
+        }
+        out.push(descriptor(
+            "memory/used",
+            SensorKind::Memory,
+            "memory",
+            "Used",
+            &Source::new(ID, "host_statistics64"),
+        ));
+        out
+    }
+
+    pub fn read(&self) -> Vec<SensorReading> {
+        let at = Timestamp::now();
+        let mut out = Vec::new();
+        if let Some(cur) = cpu_ticks() {
+            let mut prev = self.prev.lock().unwrap_or_else(PoisonError::into_inner);
+            let sum = |t: &[CpuTimes]| CpuTimes {
+                busy: t.iter().map(|c| c.busy).sum(),
+                total: t.iter().map(|c| c.total).sum(),
+            };
+            if prev.len() == cur.len() {
+                if let Some(load) = parse::load_percent(sum(&prev), sum(&cur)) {
+                    out.push(reading(SensorId::new("cpu/load"), load, at));
+                }
+                for (n, (p, c)) in prev.iter().zip(&cur).enumerate() {
+                    if let Some(load) = parse::load_percent(*p, *c) {
+                        out.push(reading(
+                            SensorId::new(format!("cpu/thread{n}/load")),
+                            load,
+                            at,
+                        ));
+                    }
+                }
+            }
+            *prev = cur;
+        }
+        if let Some(used) = memory_used() {
+            out.push(reading(SensorId::new("memory/used"), used as f64, at));
+        }
+        out
     }
 }
 
