@@ -15,6 +15,11 @@ fn surtr_command() -> Command {
     );
     // Never talk to the user's surtr serve, nor to another test's.
     cmd.env("SURTR_IPC_ENDPOINT", unique_endpoint());
+    // Runs and other data never land in the user's own data directory.
+    cmd.env(
+        "SURTR_DATA_DIR",
+        std::env::temp_dir().join(format!("surtr-cli-test-data-{}", std::process::id())),
+    );
     cmd
 }
 
@@ -1415,4 +1420,113 @@ fn stress_stops_at_the_temperature_limit() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("longer than the 1m 00s limit"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A fresh data directory for one test.
+fn data_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+#[test]
+fn stress_runs_are_recorded_and_reported() {
+    let data = data_dir("runs");
+    let run = |args: &[&str]| {
+        surtr_command()
+            .env("SURTR_DATA_DIR", &data)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let out = run(&[
+        "--mock",
+        "stress",
+        "cpu",
+        "--duration",
+        "2s",
+        "--threads",
+        "1",
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Saved as run "));
+
+    let out = run(&["--json", "runs"]);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let runs = v["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["state"], "done");
+    assert_eq!(runs[0]["report"]["outcome"]["result"], "passed");
+    assert!(!runs[0]["timeline"].as_array().unwrap().is_empty());
+    assert!(runs[0]["id"].as_str().unwrap().ends_with("-cpu"));
+
+    let text = String::from_utf8(run(&["runs"]).stdout).unwrap();
+    assert!(text.contains("passed"), "{text}");
+    let text = String::from_utf8(run(&["runs", "show", "latest"]).stdout).unwrap();
+    assert!(text.contains("Passed: no errors"), "{text}");
+
+    let page = data.join("report.html");
+    let out = run(&["runs", "report", "latest", "--out", page.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let html = std::fs::read_to_string(&page).unwrap();
+    assert!(html.contains("Passed: no errors"));
+    assert_eq!(run(&["runs", "show", "nope"]).status.code(), Some(1));
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[test]
+fn a_run_cut_short_is_recovered_as_interrupted() {
+    let data = data_dir("journal");
+    let mut host = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args([
+            "--mock",
+            "stress",
+            "cpu",
+            "--duration",
+            "30s",
+            "--threads",
+            "1",
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    // Wait until the journal holds a few seconds of timeline.
+    let runs = data.join("runs");
+    let mut ticks = 0;
+    for _ in 0..100 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let journal = std::fs::read_dir(&runs)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "json"));
+        if let Some(text) = journal.and_then(|p| std::fs::read_to_string(p).ok())
+            && let Ok(v) = serde_json::from_str::<Value>(&text)
+        {
+            ticks = v["timeline"].as_array().map_or(0, Vec::len);
+            if ticks >= 2 {
+                break;
+            }
+        }
+    }
+    assert!(ticks >= 2, "the journal is written during the run");
+    // As if the machine reset: the host dies without finishing the record.
+    host.kill().unwrap();
+    host.wait().unwrap();
+
+    let out = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args(["--json", "runs"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("was interrupted"));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let run = &v["runs"][0];
+    assert_eq!(run["state"], "interrupted");
+    assert!(run["report"].is_null());
+    assert!(run["timeline"].as_array().unwrap().len() >= 2, "{run}");
+    let _ = std::fs::remove_dir_all(&data);
 }

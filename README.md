@@ -9,8 +9,9 @@ releases yet. Working today: system information, CPU, memory and GPU sensors
 (NVIDIA through NVML, AMD on Linux), a terminal UI, history recording, alerts,
 Prometheus metrics, a read-only MCP server for AI agents ([docs/mcp.md](docs/mcp.md))
 and a local REST and WebSocket API ([docs/api.md](docs/api.md)).
-Stress tests and tuning come later; when they arrive, remember that a stress
-test can crash or hang a machine, so save your work first.
+A first stress test (`surtr stress cpu`) checks every result and stops at a
+temperature limit; tuning comes later. A stress test can still crash or hang
+an unstable machine, so save your work first.
 
 See [the plan](docs/PLAN.md) for goals, architecture and milestones, and
 [the mockups](docs/mockups/README.md) for the intended UI. Bug reports and
@@ -33,7 +34,7 @@ hardware reports are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 | [`surtr-store`](crates/surtr-store) | Sensor history in SQLite (compiled in, not shipped separately): retention and bucketed queries. |
 | [`surtr-view`](crates/surtr-view) | What every front end shows: view models, value formatting, health levels and theme tokens (dark and light). |
 | [`surtr-tui`](crates/surtr-tui) | `surtr tui`: Overview, Sensors (with trends and a `/` filter), GPU and Capabilities views; command palette (`:`); keyboard and mouse; works over SSH. |
-| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `status`, `tui`, `watch`, `alerts`, `caps`, `setup`, `sensors`, `gpu procs`, `gpu throttle`, `serve`, `mcp`, `token`, `record`, `history`, `export`, `diag`, `config`, `completions`, with `--json` and `--mock`. Colored on a terminal, plain when piped or with `NO_COLOR`. |
+| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `status`, `tui`, `watch`, `alerts`, `caps`, `setup`, `sensors`, `stress cpu`, `runs`, `gpu procs`, `gpu throttle`, `serve`, `mcp`, `token`, `record`, `history`, `export`, `diag`, `config`, `completions`, with `--json` and `--mock`. Colored on a terminal, plain when piped or with `NO_COLOR`. |
 
 ## Building
 

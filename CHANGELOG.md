@@ -4,6 +4,30 @@ All notable changes to Surtr are listed here. Surtr follows
 [Semantic Versioning](https://semver.org/); before 1.0, minor versions may
 change commands and JSON output.
 
+## [Unreleased]
+
+### Added
+- `surtr stress cpu`: a verified CPU stress test. Every thread repeats
+  computations with known answers, and any wrong answer is reported with
+  its CPU and clock. It runs in a separate worker process, stops at 95 °C
+  (or 5 °C below the CPU's own critical limit) and after 30 minutes at
+  most (`[stress]` in config.toml), and refuses to run without a CPU
+  temperature sensor unless `--unmonitored` (60 seconds at most).
+- `surtr runs`, `surtr runs show`, `surtr runs report`: every stress run is
+  recorded, and a run cut short by a reset or freeze is reported as
+  interrupted with what it recorded up to then; HTML reports with charts.
+- Sensors carry the limits the hardware reports; `status` and alerts use
+  them.
+
+### Fixed
+- Linux: impossible placeholder temperatures (-273.2 °C) are no longer shown.
+- Linux: no false warning for network adapters that run hot by design.
+- Linux: with acpi-cpufreq, the listed maximum clock is shown as the base
+  clock.
+- The in-kernel amdgpu driver shows its kernel release as its version.
+- `surtr tui` no longer quits when an arrow key arrives in pieces over SSH;
+  Esc no longer quits (use q or Ctrl+C).
+
 ## [0.1.0] - 2026-10-22
 
 The first preview release: hardware inspection and monitoring from the

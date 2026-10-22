@@ -7,4 +7,6 @@
 
 pub mod cpu;
 pub mod event;
+pub mod html;
+pub mod record;
 pub mod runner;

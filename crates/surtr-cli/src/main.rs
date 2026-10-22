@@ -26,6 +26,7 @@ mod mcp_config;
 mod notify;
 mod remote;
 mod render;
+mod runs;
 mod serve;
 mod setup;
 mod stress;
@@ -192,6 +193,11 @@ enum Command {
     Stress {
         #[command(subcommand)]
         test: StressCommand,
+    },
+    /// List past stress runs, or show or report one.
+    Runs {
+        #[command(subcommand)]
+        command: Option<RunsCommand>,
     },
     /// Internal: runs a stress workload for `surtr stress`.
     #[command(hide = true)]
@@ -361,6 +367,23 @@ fn config_command(
             Ok(format!("Wrote {shown} with every setting commented out.\n"))
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+enum RunsCommand {
+    /// Show one run (`latest` for the newest).
+    Show {
+        /// Run id, as `surtr runs` lists it, or `latest`.
+        id: String,
+    },
+    /// Write a run as a self-contained HTML report with charts.
+    Report {
+        /// Run id, as `surtr runs` lists it, or `latest`.
+        id: String,
+        /// Where to write it (default: surtr-run-<id>.html here).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -537,6 +560,19 @@ fn main() -> ExitCode {
     }) = &cli.command
     {
         return worker(workload, *threads, *duration_ms);
+    }
+    // Past runs need no hardware access.
+    if let Some(Command::Runs { command }) = &cli.command {
+        return match runs::command(command.as_ref(), cli.json) {
+            Ok(text) => {
+                anstream::print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("surtr: {err}");
+                ExitCode::FAILURE
+            }
+        };
     }
     let _logging = logging::init();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), command = ?cli.command, "surtr started");
@@ -733,7 +769,9 @@ fn run(
             code.set(exit);
             out(json!(report), stress::describe(&report))
         }
-        Command::Worker { .. } => unreachable!("handled before the hub is built"),
+        Command::Worker { .. } | Command::Runs { .. } => {
+            unreachable!("handled before the hub is built")
+        }
         Command::Setup { dry_run } => Ok(setup::run(&hub.capabilities(), *dry_run)?),
         Command::Caps => {
             let capabilities = hub.capabilities();

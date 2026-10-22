@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use surtr_model::{SensorDescriptor, SensorKind};
 
 use crate::event::Event;
@@ -29,7 +29,7 @@ pub const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(30 * 60);
 pub const UNMONITORED_MAX: Duration = Duration::from_secs(60);
 
 /// A temperature the host watches, and where it stops the run.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Watched {
     /// Sensor id, for example `hwmon/cpu0/temp1`.
     pub id: String,
@@ -57,7 +57,7 @@ pub fn watched(sensors: &[SensorDescriptor], max_temp_c: f64) -> Vec<Watched> {
 }
 
 /// How a run ended.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum Outcome {
     /// Ran its whole duration without a wrong answer.
@@ -84,7 +84,7 @@ pub enum Outcome {
 }
 
 /// A wrong answer, with what the host knew at the time.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Failure {
     /// Worker thread.
     pub thread: u32,
@@ -99,7 +99,7 @@ pub struct Failure {
 }
 
 /// The result of a run.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Report {
     /// How it ended. Wrong answers win over a later limit or stop.
     pub outcome: Outcome,

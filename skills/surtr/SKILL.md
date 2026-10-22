@@ -14,8 +14,10 @@ Everything below is read-only unless marked otherwise.
   (global flag); the text layout can change between versions.
 - **Read-only by default.** Never run `surtr setup` without the user's
   explicit go-ahead for that specific step: it loads kernel modules or
-  installs packages with sudo. Future stress and tuning commands follow the
-  same rule; a stress test can crash the machine and lose unsaved work.
+  installs packages with sudo. Never start `surtr stress` without the user's
+  explicit go-ahead for that run, its length included: a stress test heats
+  the machine, slows everything else down, and can crash it and lose
+  unsaved work. Reading past runs (`surtr runs`) is fine.
 - **Don't guess missing values.** A sensor that isn't in the output is not
   readable here; `surtr caps --json` says why and how to fix it. Say so
   instead of estimating.
@@ -39,6 +41,7 @@ Everything below is read-only unless marked otherwise.
 | Did anything trip an alert? | `surtr alerts --json` |
 | Watch values change for a while | `surtr watch --json --count 10 [filters]` (one JSON object per line) |
 | Record a short baseline | `surtr record --count 60` (one sample per second into the history database) |
+| Past stress runs and their results | `surtr runs --json`, then `surtr runs show <id> --json` |
 | Summary for a bug report | `surtr diag --summary` (Markdown; contains no serials or user names) |
 
 `--mock` runs any command against a built-in fake machine, useful for trying
