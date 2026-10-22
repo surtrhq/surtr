@@ -1,0 +1,35 @@
+name: Bug report
+description: Something in Surtr is wrong, crashes or shows a wrong value.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The command or steps, if you can make it happen again.
+      placeholder: surtr sensors --json
+  - type: textarea
+    id: diag
+    attributes:
+      label: Diagnostic summary
+      description: >
+        Paste the output of `surtr diag --summary`. It contains versions,
+        providers, health and recent warnings, and no serial numbers,
+        addresses or user names. If Surtr can't start, write that instead.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >
+        Screenshots, or the zip from `surtr diag` (it shows what it contains
+        and asks before writing). Leave out anything you don't want public.

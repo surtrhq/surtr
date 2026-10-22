@@ -1,0 +1,37 @@
+name: Hardware support
+description: A CPU, GPU, board or sensor that Surtr misses or reads wrong.
+labels: [enhancement, needs-hardware]
+body:
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: The part, as exactly as you know it.
+      placeholder: "AMD Radeon RX 7900 XTX, ASUS ROG STRIX B650E-F"
+    validations:
+      required: true
+  - type: textarea
+    id: missing
+    attributes:
+      label: What is missing or wrong
+      description: >
+        Which value is missing or wrong, and what another tool (HWiNFO,
+        lm-sensors, nvidia-smi, ...) shows for it.
+    validations:
+      required: true
+  - type: textarea
+    id: diag
+    attributes:
+      label: Diagnostic summary
+      description: Paste the output of `surtr diag --summary`.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: sensors
+    attributes:
+      label: Sensors
+      description: >
+        The output of `surtr sensors --json`, if you are fine sharing it. It
+        lists sensor names and values only.
+      render: json

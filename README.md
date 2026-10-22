@@ -4,9 +4,16 @@ Surtr is an open-source, cross-platform hardware inspection, monitoring,
 stress-testing and tuning tool for gamers, overclockers, AI workstation owners
 and anyone who wants to know their PC is healthy. It is written in Rust.
 
-**Status: early development (milestone M2, sensors).** OS, CPU and memory
-information and basic CPU and memory sensors work so far. See [the plan](docs/PLAN.md) for goals, architecture and
-milestones, and [the mockups](docs/mockups/README.md) for the intended UI.
+**Status: pre-release, early development (milestone M5).** There are no
+releases yet. Working today: system information, CPU, memory and GPU sensors
+(NVIDIA through NVML, AMD on Linux), a terminal UI, history recording, alerts,
+Prometheus metrics, and a read-only MCP server for AI agents ([docs/mcp.md](docs/mcp.md)).
+Stress tests and tuning come later; when they arrive, remember that a stress
+test can crash or hang a machine, so save your work first.
+
+See [the plan](docs/PLAN.md) for goals, architecture and milestones, and
+[the mockups](docs/mockups/README.md) for the intended UI. Bug reports and
+hardware reports are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Layout
 
