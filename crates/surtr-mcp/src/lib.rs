@@ -6,12 +6,16 @@
 //! through JSON encoding, and home-directory paths are redacted, so nothing a
 //! sensor or process name contains can pose as an instruction.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use rmcp::{
-    ServerHandler, ServiceExt,
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{Implementation, ServerCapabilities, ServerConfig},
+    ErrorData, RoleServer, ServerHandler, ServiceExt,
+    handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
+    model::{
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+        ServerCapabilities, ServerConfig,
+    },
+    service::RequestContext,
     tool, tool_handler, tool_router,
 };
 use schemars::JsonSchema;
@@ -21,6 +25,9 @@ use surtr_core::{Hub, Sample, paths};
 use surtr_model::{SensorId, SensorKind, Timestamp, Unit};
 use surtr_store::Store;
 use surtr_view::format;
+
+mod audit;
+use audit::{Audit, Entry};
 
 /// Instructions every client receives with the server's identity.
 const INSTRUCTIONS: &str = "Surtr reports this machine's hardware: system \
@@ -44,6 +51,7 @@ pub struct Server {
     hub: Arc<Hub>,
     db: PathBuf,
     diagnostics: Diagnostics,
+    audit: Arc<Audit>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -126,12 +134,14 @@ fn kind_name(kind: SensorKind) -> String {
 
 #[tool_router]
 impl Server {
-    /// A server answering from `hub`, with history from `db`.
+    /// A server answering from `hub`, with history from `db`. Tool calls
+    /// are logged to `mcp-audit.jsonl` next to the database.
     pub fn new(hub: Arc<Hub>, db: PathBuf, diagnostics: Diagnostics) -> Self {
         // Rate sensors (loads, throughput) need a first sample to compare
         // with, so the first `get_sensors` already has them.
         hub.read();
         Self {
+            audit: Arc::new(Audit::new(Some(audit_path(&db)))),
             hub,
             db,
             diagnostics,
@@ -236,6 +246,23 @@ impl Server {
     }
 }
 
+/// Where tool calls are logged: `mcp-audit.jsonl` next to the database.
+pub fn audit_path(db: &std::path::Path) -> PathBuf {
+    db.with_file_name("mcp-audit.jsonl")
+}
+
+/// Size of a result's text, for the audit log.
+fn text_bytes(result: &CallToolResult) -> usize {
+    result
+        .content
+        .iter()
+        .map(|c| match c {
+            ContentBlock::Text(t) => t.text.len(),
+            _ => 0,
+        })
+        .sum()
+}
+
 /// The `query_history` answer.
 fn history(db: &std::path::Path, q: &HistoryQuery) -> Result<String, String> {
     if !db.exists() {
@@ -315,6 +342,54 @@ fn history(db: &std::path::Path, q: &HistoryQuery) -> Result<String, String> {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for Server {
+    /// Every call passes the rate limit and lands in the audit log.
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let client = context.peer.peer_info().map_or_else(
+            || "unknown".to_owned(),
+            |p| format!("{} {}", p.client_info.name, p.client_info.version),
+        );
+        let tool = request.name.to_string();
+        let arguments = request.arguments.clone();
+        let started = Instant::now();
+        let (response, outcome, bytes) = if self.audit.allow() {
+            let response = self
+                .tool_router
+                .call(ToolCallContext::new(self, request, context))
+                .await;
+            let (outcome, bytes) = match &response {
+                Ok(CallToolResponse::Complete(r)) => (
+                    if r.is_error == Some(true) {
+                        "error"
+                    } else {
+                        "ok"
+                    },
+                    text_bytes(r),
+                ),
+                Ok(_) => ("ok", 0),
+                Err(_) => ("refused", 0),
+            };
+            (response, outcome, bytes)
+        } else {
+            let result = CallToolResult::error(vec![ContentBlock::text(
+                "too many calls; wait a few seconds and try again",
+            )]);
+            (Ok(result.into()), "rate_limited", 0)
+        };
+        self.audit.record(&Entry {
+            client: &client,
+            tool: &tool,
+            arguments: arguments.as_ref(),
+            outcome,
+            bytes,
+            ms: started.elapsed().as_millis(),
+        });
+        response
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("surtr", env!("CARGO_PKG_VERSION")))

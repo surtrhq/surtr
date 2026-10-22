@@ -760,6 +760,9 @@ fn tool_text(result: &Value) -> Value {
 
 #[test]
 fn mcp_answers_read_tools() {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-mcp-tools-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("history.db");
     let call = |name: &str, arguments: Value| {
         (
             "tools/call",
@@ -767,7 +770,7 @@ fn mcp_answers_read_tools() {
         )
     };
     let r = mcp_session(
-        &["--mock", "mcp"],
+        &["--mock", "mcp", "--db", db.to_str().unwrap()],
         &[
             ("tools/list", serde_json::json!({})),
             call(
@@ -817,6 +820,19 @@ fn mcp_answers_read_tools() {
             .contains("Surtr diagnostic summary"),
         "{summary}"
     );
+
+    // Every tool call is in the audit log; tools/list is not a call.
+    let audit = std::fs::read_to_string(dir.join("mcp-audit.jsonl")).unwrap();
+    let entries: Vec<Value> = audit
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(entries.len(), 4, "{audit}");
+    assert_eq!(entries[0]["tool"], "get_sensors");
+    assert_eq!(entries[0]["client"], "surtr-test 0");
+    assert_eq!(entries[0]["arguments"]["kind"], "temperature");
+    assert!(entries.iter().all(|e| e["outcome"] == "ok"));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

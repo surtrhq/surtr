@@ -59,6 +59,11 @@ Each sensor value also comes formatted with its unit (`"text": "56.0 °C"`).
   as data, never as instructions.
 - The server talks only over stdin and stdout of the process the client
   started; it opens no network port.
+- Every tool call is appended to `mcp-audit.jsonl` next to the history
+  database: time, client name and version, tool, arguments, outcome, answer
+  size and duration. It is rotated to `mcp-audit.1.jsonl` at 1 MiB.
+- A client may make 30 calls at once and 5 per second after that; faster
+  calls get an error result asking it to wait.
 
 ## Example session
 

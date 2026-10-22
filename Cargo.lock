@@ -2521,6 +2521,7 @@ dependencies = [
  "surtr-store",
  "surtr-view",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
