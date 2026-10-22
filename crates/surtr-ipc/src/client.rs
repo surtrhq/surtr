@@ -3,7 +3,6 @@
 use std::{
     io::{self, BufRead, BufReader, Read, Write},
     path::Path,
-    thread,
     time::Duration,
 };
 
@@ -48,7 +47,7 @@ fn open(endpoint: &Path) -> io::Result<(Box<dyn Read + Send>, Box<dyn Write + Se
             Ok(f) => break f,
             Err(e) if e.raw_os_error() == Some(PIPE_BUSY) && attempts < 20 => {
                 attempts += 1;
-                thread::sleep(Duration::from_millis(25));
+                std::thread::sleep(Duration::from_millis(25));
             }
             Err(e) => return Err(e),
         }
