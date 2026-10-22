@@ -16,6 +16,7 @@ use surtr_model::{Feature, Remedy, SensorId, Timestamp};
 use surtr_store::Store;
 
 mod diag;
+mod export;
 mod history;
 mod logging;
 mod render;
@@ -33,6 +34,7 @@ Examples:
   surtr gpu throttle             why each GPU is below its potential clock
   surtr record --count 60        one minute of history
   surtr history cpu/load --since 10m --bucket 1m
+  surtr export --since 1h --bucket 10s > history.csv
   surtr diag                     bug-report bundle (preview first, nothing uploaded)
   surtr --mock info              the built-in test machine
 
@@ -136,6 +138,28 @@ enum Command {
         #[arg(long)]
         db: Option<PathBuf>,
     },
+    /// Export recorded history as CSV (default) or JSON, one row per sensor
+    /// per time bucket.
+    Export {
+        /// Only sensors whose id, label, device or provider contains one of
+        /// these. Default: all recorded sensors.
+        filters: Vec<String>,
+        /// How far back to export (for example 30m, 2h, 7d).
+        #[arg(long, default_value = "1h")]
+        since: String,
+        /// Bucket length (for example 10s, 1m); default: every sample.
+        #[arg(long)]
+        bucket: Option<String>,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = ExportFormat::Csv)]
+        format: ExportFormat,
+        /// Write to this file instead of standard output.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Database file (default: the per-user data directory).
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
     /// List recorded sensors, or show the stored history of one sensor.
     History {
         /// Sensor id as shown by `surtr history` (for example cpu/load).
@@ -168,6 +192,15 @@ enum GpuCommand {
     Procs,
     /// Why each GPU runs below its potential clock right now.
     Throttle,
+}
+
+/// File formats for `surtr export`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum ExportFormat {
+    /// Comma-separated values with a header row.
+    Csv,
+    /// A JSON array of series.
+    Json,
 }
 
 /// Features only GPU backends provide.
@@ -474,6 +507,53 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
                 json!({ "db": path, "samples": taken, "values": stored }),
                 format!("Stored {stored} values from {taken} samples.\n"),
             )
+        }
+        Command::Export {
+            filters,
+            since,
+            bucket,
+            format,
+            out: file,
+            db,
+        } => {
+            let path = db_path(db.as_ref())?;
+            let store = Store::open(&path)?;
+            let sensors = store.sensors()?;
+            let now = Timestamp::now();
+            let from = Timestamp(now.0.saturating_sub(history::parse_duration_ms(since)?));
+            let bucket_ms = match bucket {
+                Some(b) => history::parse_duration_ms(b)?.max(1),
+                None => 1,
+            };
+            let series = export::collect(
+                &store,
+                &sensors,
+                filters,
+                from,
+                Timestamp(now.0 + 1),
+                bucket_ms,
+            )?;
+            if series.is_empty() {
+                return Err(format!("no recorded sensor matches in {}", path.display()).into());
+            }
+            let text = match format {
+                ExportFormat::Csv => export::csv(&series),
+                ExportFormat::Json => {
+                    serde_json::to_string_pretty(&export::json(&series, bucket_ms))? + "\n"
+                }
+            };
+            match file {
+                Some(file) => {
+                    std::fs::write(file, &text)?;
+                    let rows: usize = series.iter().map(|s| s.buckets.len()).sum();
+                    Ok(format!(
+                        "Wrote {rows} rows for {} sensors to {}.\n",
+                        series.len(),
+                        surtr_core::paths::redact(&file.display().to_string())
+                    ))
+                }
+                None => Ok(text),
+            }
         }
         Command::History {
             sensor,

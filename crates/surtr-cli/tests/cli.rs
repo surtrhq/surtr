@@ -388,3 +388,46 @@ fn watch_text_frames_when_piped() {
     ]);
     assert_eq!(code, Some(1));
 }
+
+#[test]
+fn export_csv_and_json() {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-export-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("history.db");
+    let db = db.to_str().unwrap();
+    // --retain 0: the mock's clock starts at 2026-01-01.
+    let (ok, _) = surtr(&[
+        "record",
+        "--mock",
+        "--count",
+        "3",
+        "--retain",
+        "0",
+        "--interval",
+        "0",
+        "--db",
+        db,
+    ]);
+    assert!(ok);
+
+    let (ok, csv) = surtr(&["export", "--since", "1000d", "--db", db]);
+    assert!(ok);
+    let mut lines = csv.lines();
+    assert_eq!(
+        lines.next(),
+        Some("time,provider,sensor,device,label,unit,avg,min,max,count")
+    );
+    assert_eq!(lines.count(), 3 * 8);
+    assert!(csv.contains(",mock,cpu0/package/temp,cpu0,Package temperature,celsius,"));
+
+    let v = json(&[
+        "export", "temp", "--since", "1000d", "--bucket", "1h", "--format", "json", "--db", db,
+    ]);
+    let series = v.as_array().unwrap();
+    assert_eq!(series.len(), 2);
+    assert_eq!(series[0]["points"][0]["count"], 3);
+
+    let (ok, _) = surtr(&["export", "no-such-sensor", "--since", "1000d", "--db", db]);
+    assert!(!ok);
+    let _ = std::fs::remove_dir_all(&dir);
+}
