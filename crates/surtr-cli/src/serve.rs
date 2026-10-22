@@ -1,7 +1,6 @@
-//! `surtr serve`: the background process (plan, sections 4 and 5.6). This
-//! first version polls the sensors, records history, and with `--metrics`
-//! serves Prometheus metrics. Front ends talking to it over local IPC come
-//! next (#33).
+//! `surtr serve`: the background process (plan, sections 4 and 5.6). It polls
+//! the sensors, records history, raises alerts, answers front ends over the
+//! local IPC endpoint, and with `--metrics` serves Prometheus metrics.
 
 use std::{
     error::Error,
@@ -15,10 +14,13 @@ use std::{
 };
 
 use axum::{Router, http::header, routing::get};
-use surtr_core::{Hub, alerts, paths};
-use surtr_model::Timestamp;
+use serde_json::{Value, json};
+use surtr_backend_native::process_name;
+use surtr_core::{Hub, Sample, alerts, paths};
+use surtr_model::{GpuProcess, ThrottleState, Timestamp};
 use surtr_store::Store;
 use surtr_view::Level;
+use tokio::sync::watch;
 
 /// What `surtr serve` was asked to do.
 pub struct Options {
@@ -36,6 +38,15 @@ pub struct Options {
     pub metrics_remote: bool,
     /// Show desktop notifications for fired alerts.
     pub notify: bool,
+}
+
+/// The latest read, which IPC clients get instead of reading the hardware
+/// themselves.
+#[derive(Debug, Default)]
+struct Snapshot {
+    samples: Vec<Sample>,
+    throttle: Vec<ThrottleState>,
+    processes: Vec<GpuProcess>,
 }
 
 /// Where `surtr serve` appends alerts: `alerts.jsonl` next to the database.
@@ -57,6 +68,32 @@ pub fn describe(e: &alerts::Event) -> String {
         "{state} {severity}: {} {} at {:.1} ({})",
         e.device, e.label, e.value, e.rule
     )
+}
+
+/// Answers IPC method calls from the snapshot and the static information.
+fn handler(
+    snapshot: Arc<Mutex<Snapshot>>,
+    system: Value,
+    capabilities: Value,
+) -> surtr_ipc::Handler {
+    Arc::new(move |method: &str| {
+        let s = snapshot.lock().unwrap_or_else(PoisonError::into_inner);
+        let value = match method {
+            "system_info" => return Ok(system.clone()),
+            "capabilities" => return Ok(capabilities.clone()),
+            "sensors" => json!(s.samples.iter().map(|x| &x.descriptor).collect::<Vec<_>>()),
+            "read" => json!(s.samples),
+            "gpu_processes" => json!(s.processes),
+            "throttle_reasons" => json!(s.throttle),
+            other => return Err(format!("unknown method {other}")),
+        };
+        Ok(value)
+    })
+}
+
+/// Resolves when `stop` turns true.
+async fn stopped(mut stop: watch::Receiver<bool>) {
+    let _ = stop.wait_for(|stopped| *stopped).await;
 }
 
 /// Runs until stopped (Ctrl+C) or `count` reads.
@@ -92,46 +129,76 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
     }
 
     let mut store = Store::open(&opts.db)?;
+    let system = hub.system_info();
+    let capabilities = hub.capabilities();
+    // Rate sensors need a first sample to compare with; it also gives IPC
+    // clients the sensor list before the first full read.
+    let snapshot = Arc::new(Mutex::new(Snapshot {
+        samples: hub.read(),
+        ..Snapshot::default()
+    }));
     let metrics = Arc::new(Mutex::new(String::new()));
-    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = match opts.metrics {
+
+    // IPC and metrics share one small runtime on its own thread.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()?;
+    let listener = match opts.metrics {
         Some(addr) => {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_io()
-                .build()?;
             let listener = runtime.block_on(tokio::net::TcpListener::bind(addr))?;
             eprintln!(
                 "Serving metrics on http://{}/metrics",
                 listener.local_addr()?
             );
-            let text = Arc::clone(&metrics);
-            let app = Router::new().route(
-                "/metrics",
-                get(move || {
-                    let body = text.lock().unwrap_or_else(PoisonError::into_inner).clone();
-                    async move {
-                        (
-                            [(
-                                header::CONTENT_TYPE,
-                                "text/plain; version=0.0.4; charset=utf-8",
-                            )],
-                            body,
-                        )
-                    }
-                }),
-            );
-            Some(thread::spawn(move || {
-                runtime.block_on(async move {
-                    axum::serve(listener, app)
-                        .with_graceful_shutdown(async {
-                            let _ = stopped.await;
-                        })
-                        .await
-                })
-            }))
+            Some(listener)
         }
         None => None,
     };
+    let text = Arc::clone(&metrics);
+    let app = Router::new().route(
+        "/metrics",
+        get(move || {
+            let body = text.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            async move {
+                (
+                    [(
+                        header::CONTENT_TYPE,
+                        "text/plain; version=0.0.4; charset=utf-8",
+                    )],
+                    body,
+                )
+            }
+        }),
+    );
+    let endpoint = surtr_ipc::endpoint()?;
+    let hello = surtr_ipc::Hello {
+        protocol: surtr_ipc::PROTOCOL,
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        providers: hub.provider_ids().into_iter().map(str::to_owned).collect(),
+    };
+    let answer = handler(Arc::clone(&snapshot), json!(system), json!(capabilities));
+    let (stop, stop_rx) = watch::channel(false);
+    let server = thread::spawn(move || {
+        runtime.block_on(async move {
+            let ipc = async {
+                if let Err(e) =
+                    surtr_ipc::serve(&endpoint, hello, answer, stopped(stop_rx.clone())).await
+                {
+                    eprintln!("surtr: warning: front ends can't connect: {e}");
+                }
+            };
+            let http = async {
+                if let Some(listener) = listener
+                    && let Err(e) = axum::serve(listener, app)
+                        .with_graceful_shutdown(stopped(stop_rx.clone()))
+                        .await
+                {
+                    eprintln!("surtr: warning: metrics server stopped: {e}");
+                }
+            };
+            tokio::join!(ipc, http);
+        });
+    });
 
     eprintln!(
         "Recording to {} every {} ms{}.",
@@ -148,16 +215,16 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
         .create(true)
         .append(true)
         .open(alerts_path(&opts.db))?;
-    let system = hub.system_info();
-    let capabilities = hub.capabilities();
-    // Rate sensors need a first sample to compare with.
-    hub.read();
     let mut reads = 0;
     let mut stored = 0;
     while opts.count.is_none_or(|c| reads < c) {
         thread::sleep(opts.interval);
         let samples = hub.read();
         let throttle = hub.throttle_reasons();
+        let mut processes = hub.gpu_processes();
+        for p in processes.iter_mut().filter(|p| p.name.is_none()) {
+            p.name = process_name(p.pid);
+        }
         stored += store.record(
             samples
                 .iter()
@@ -179,6 +246,11 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
                 crate::notify::send(&event);
             }
         }
+        *snapshot.lock().unwrap_or_else(PoisonError::into_inner) = Snapshot {
+            samples,
+            throttle,
+            processes,
+        };
         reads += 1;
         // Prune now and then, not on every read.
         if opts.retain_ms > 0 && reads % 600 == 1 {
@@ -186,10 +258,8 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
         }
     }
 
-    let _ = stop.send(());
-    if let Some(server) = server {
-        let _ = server.join();
-    }
+    let _ = stop.send(true);
+    let _ = server.join();
     drop(lock);
     Ok(format!("Stored {stored} values from {reads} reads.\n"))
 }

@@ -23,6 +23,7 @@ mod export;
 mod history;
 mod logging;
 mod notify;
+mod remote;
 mod render;
 mod serve;
 mod style;
@@ -53,6 +54,11 @@ struct Cli {
     /// Print JSON instead of text.
     #[arg(long, global = true)]
     json: bool,
+
+    /// Read the hardware directly even if `surtr serve` is running (by default
+    /// commands use a running daemon's latest readings).
+    #[arg(long, global = true)]
+    embedded: bool,
 
     /// Use the built-in mock provider instead of this machine's hardware.
     #[arg(long, global = true)]
@@ -357,12 +363,17 @@ fn reason(err: ProviderError) -> String {
     }
 }
 
-/// The providers for this run: the mock alone, or the OS backend plus every
-/// GPU backend that can start here.
-fn hub(mock: bool) -> Result<Hub, String> {
+/// The providers for this run: the mock alone; a running `surtr serve` (unless
+/// `embedded`); or the OS backend plus every GPU backend that can start here.
+fn hub(mock: bool, embedded: bool) -> Result<Hub, String> {
     let mut hub = Hub::new();
     if mock {
         hub.add(Box::new(MockProvider::desktop()));
+        return Ok(hub);
+    }
+    if !embedded && let Some(daemon) = remote::RemoteProvider::connect() {
+        tracing::info!("using surtr serve over local IPC");
+        hub.add(Box::new(daemon));
         return Ok(hub);
     }
     hub.add(Box::new(NativeProvider::new().map_err(reason)?));
@@ -434,8 +445,14 @@ fn main() -> ExitCode {
     let _logging = logging::init();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), command = ?cli.command, "surtr started");
     let code = Cell::new(0);
-    let result =
-        hub(cli.mock).and_then(|hub| run(&cli, &hub, &code, &settings).map_err(|e| e.to_string()));
+    // The daemon and the recorder read the hardware themselves.
+    let embedded = cli.embedded
+        || matches!(
+            cli.command,
+            Some(Command::Serve { .. } | Command::Record { .. })
+        );
+    let result = hub(cli.mock, embedded)
+        .and_then(|hub| run(&cli, &hub, &code, &settings).map_err(|e| e.to_string()));
     match result {
         Ok(output) => {
             // anstream drops styling when not writing to a terminal.

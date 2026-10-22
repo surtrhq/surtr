@@ -4,7 +4,7 @@
 
 #![forbid(unsafe_code)]
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use surtr_backend::{Provider, ProviderError};
 use surtr_model::{
     Capabilities, Capability, Feature, GpuProcess, Remedy, SensorDescriptor, Support, SystemInfo,
@@ -28,7 +28,7 @@ fn logged<T>(p: &dyn Provider, what: &str, result: Result<T, ProviderError>) -> 
 
 /// One sensor with its latest value. `value` is absent when the sensor
 /// couldn't be read this time.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Sample {
     /// The sensor; `descriptor.source.provider` tells which provider owns it.
     #[serde(flatten)]

@@ -19,6 +19,7 @@ surtr-backend-amd.workspace = true
 surtr-backend-nvidia.workspace = true
 surtr-core.workspace = true
 surtr-export.workspace = true
+surtr-ipc.workspace = true
 surtr-store.workspace = true
 surtr-tui.workspace = true
 surtr-view.workspace = true
@@ -35,7 +36,7 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 flate2 = "1.1.10"
 crossterm = "0.29"
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }
-tokio = { version = "1", default-features = false, features = ["rt", "net", "sync"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "sync", "macros"] }
 notify-rust = "4"
 
 [lints]

@@ -13,7 +13,20 @@ fn surtr_command() -> Command {
         "SURTR_CONFIG_DIR",
         std::env::temp_dir().join(format!("surtr-cli-test-config-{}", std::process::id())),
     );
+    // Never talk to the user's surtr serve, nor to another test's.
+    cmd.env("SURTR_IPC_ENDPOINT", unique_endpoint());
     cmd
+}
+
+/// An IPC endpoint name no other command in this run uses.
+fn unique_endpoint() -> String {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    format!(
+        "surtr-cli-test-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn test_log_dir() -> std::path::PathBuf {
@@ -605,6 +618,53 @@ fn serve_records_and_exposes_metrics() {
     assert!(child.wait().unwrap().success());
     let (ok, _) = surtr(&["history", "--db", db]);
     assert!(ok);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn commands_read_through_a_running_serve() {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-client-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("history.db");
+    let endpoint = unique_endpoint();
+
+    let mut child = surtr_command()
+        .env("SURTR_IPC_ENDPOINT", &endpoint)
+        .args(["--mock", "serve", "--count", "40", "--interval", "100"])
+        .args(["--retain", "0", "--db", db.to_str().unwrap()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+
+    // Without --mock the command still sees mock data: it came from serve.
+    let sensors = |extra: &[&str]| {
+        let out = surtr_command()
+            .env("SURTR_IPC_ENDPOINT", &endpoint)
+            .args(["sensors", "--json", "--interval", "0"])
+            .args(extra)
+            .output()
+            .unwrap();
+        serde_json::from_slice::<Value>(&out.stdout).unwrap_or(Value::Null)
+    };
+    let has_mock = |v: &Value| {
+        v["sensors"]
+            .as_array()
+            .is_some_and(|s| s.iter().any(|s| s["id"] == "cpu0/package/temp"))
+    };
+    let mut remote = Value::Null;
+    for _ in 0..30 {
+        remote = sensors(&[]);
+        if has_mock(&remote) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(has_mock(&remote), "{remote}");
+    // --embedded reads this machine's hardware instead.
+    assert!(!has_mock(&sensors(&["--embedded"])));
+
+    assert!(child.wait().unwrap().success());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

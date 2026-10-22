@@ -16,6 +16,7 @@ surtr-backend-native = { path = "crates/surtr-backend-native" }
 surtr-backend-nvidia = { path = "crates/surtr-backend-nvidia" }
 surtr-backend-amd = { path = "crates/surtr-backend-amd" }
 surtr-core = { path = "crates/surtr-core" }
+surtr-ipc = { path = "crates/surtr-ipc" }
 surtr-export = { path = "crates/surtr-export" }
 surtr-store = { path = "crates/surtr-store" }
 surtr-view = { path = "crates/surtr-view" }
