@@ -20,6 +20,7 @@ surtr-backend-nvidia.workspace = true
 surtr-core.workspace = true
 surtr-export.workspace = true
 surtr-ipc.workspace = true
+surtr-mcp.workspace = true
 surtr-store.workspace = true
 surtr-tui.workspace = true
 surtr-view.workspace = true

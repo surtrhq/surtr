@@ -1,7 +1,7 @@
 //! The `surtr` command.
 
 use std::{
-    cell::Cell, error::Error, io::IsTerminal, path::PathBuf, process::ExitCode, thread,
+    cell::Cell, error::Error, io::IsTerminal, path::PathBuf, process::ExitCode, sync::Arc, thread,
     time::Duration,
 };
 
@@ -151,6 +151,14 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         last: usize,
         /// Database file whose alerts to show (default: settings, else the
+        /// per-user data directory).
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Answer AI agents over MCP on stdin and stdout (read-only). An MCP
+    /// client such as Claude Code starts this; see docs/mcp.md.
+    Mcp {
+        /// Database file for history queries (default: settings, else the
         /// per-user data directory).
         #[arg(long)]
         db: Option<PathBuf>,
@@ -452,7 +460,7 @@ fn main() -> ExitCode {
             Some(Command::Serve { .. } | Command::Record { .. })
         );
     let result = hub(cli.mock, embedded)
-        .and_then(|hub| run(&cli, &hub, &code, &settings).map_err(|e| e.to_string()));
+        .and_then(|hub| run(&cli, &Arc::new(hub), &code, &settings).map_err(|e| e.to_string()));
     match result {
         Ok(output) => {
             // anstream drops styling when not writing to a terminal.
@@ -468,7 +476,12 @@ fn main() -> ExitCode {
 
 /// Runs the command and returns its output; `code` receives a non-zero exit
 /// code for commands that report one (`status`).
-fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>, settings: &Config) -> Result<String, Box<dyn Error>> {
+fn run(
+    cli: &Cli,
+    hub: &Arc<Hub>,
+    code: &Cell<u8>,
+    settings: &Config,
+) -> Result<String, Box<dyn Error>> {
     // A flag wins over the settings file, which wins over the default.
     let ms = |flag: &Option<u64>| flag.or(settings.general.interval_ms).unwrap_or(1000);
     let providers = hub.provider_ids();
@@ -670,6 +683,19 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>, settings: &Config) -> Result<Strin
                 ));
             }
             out(json!({ "alerts": recent }), text)
+        }
+        Command::Mcp { db } => {
+            let server = surtr_mcp::Server::new(
+                Arc::clone(hub),
+                db_path(db.as_ref(), settings)?,
+                Arc::new(|hub| diag::build(hub).summary),
+            );
+            // stdout carries the protocol; nothing else may be printed.
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+                .block_on(surtr_mcp::serve_stdio(server))?;
+            Ok(String::new())
         }
         Command::Serve {
             interval,

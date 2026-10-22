@@ -18,12 +18,13 @@ milestones, and [the mockups](docs/mockups/README.md) for the intended UI.
 | [`surtr-backend-nvidia`](crates/surtr-backend-nvidia) | NVIDIA GPUs through NVML, loaded at run time from the driver install (never shipped; see its NOTICE): identity, sensors, throttle reasons, per-process memory. |
 | [`surtr-backend-amd`](crates/surtr-backend-amd) | AMD GPUs on Linux through the `amdgpu` sysfs files: identity (named from `pci.ids`), sensors, per-process memory from DRM `fdinfo`. |
 | [`surtr-core`](crates/surtr-core) | The `Hub`, which combines the OS backend and GPU backends into one view (and logs provider failures); per-user paths, home-directory redaction and the settings file (`config.toml`). |
+| [`surtr-mcp`](crates/surtr-mcp) | `surtr mcp`: a read-only MCP server so AI agents can ask about this machine's hardware; see [docs/mcp.md](docs/mcp.md). |
 | [`surtr-ipc`](crates/surtr-ipc) | Local IPC between `surtr serve` and front ends, over a socket (Unix) or named pipe (Windows) that only the same user can open. While `serve` runs, other commands use its latest readings (`--embedded` reads the hardware directly). |
 | [`surtr-export`](crates/surtr-export) | Prometheus text format for `surtr serve --metrics`; Grafana dashboards in [`dashboards/`](dashboards). |
 | [`surtr-store`](crates/surtr-store) | Sensor history in SQLite (compiled in, not shipped separately): retention and bucketed queries. |
 | [`surtr-view`](crates/surtr-view) | What every front end shows: view models, value formatting, health levels and theme tokens (dark and light). |
 | [`surtr-tui`](crates/surtr-tui) | `surtr tui`: Overview, Sensors (with trends and a `/` filter), GPU and Capabilities views; command palette (`:`); keyboard and mouse; works over SSH. |
-| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `status`, `tui`, `watch`, `alerts`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, `serve`, `record`, `history`, `export`, `diag`, `config`, `completions`, with `--json` and `--mock`. Colored on a terminal, plain when piped or with `NO_COLOR`. |
+| [`surtr-cli`](crates/surtr-cli) | The `surtr` command: `info`, `status`, `tui`, `watch`, `alerts`, `caps`, `sensors`, `gpu procs`, `gpu throttle`, `serve`, `mcp`, `record`, `history`, `export`, `diag`, `config`, `completions`, with `--json` and `--mock`. Colored on a terminal, plain when piped or with `NO_COLOR`. |
 
 ## Building
 

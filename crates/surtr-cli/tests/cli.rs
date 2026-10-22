@@ -708,3 +708,171 @@ fn alerts_rules_and_log() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Runs `surtr <args>` (which include `mcp`) and sends `calls` (method, params) after the
+/// handshake; returns the result of each call.
+fn mcp_session(args: &[&str], calls: &[(&str, Value)]) -> Vec<Value> {
+    use std::io::{BufRead, BufReader, Write};
+    let mut child = surtr_command()
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut send = |v: Value| writeln!(stdin, "{v}").unwrap();
+    send(serde_json::json!({
+        "jsonrpc": "2.0", "id": 0, "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "surtr-test", "version": "0" }
+        }
+    }));
+    send(serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+    for (i, (method, params)) in calls.iter().enumerate() {
+        send(serde_json::json!({
+            "jsonrpc": "2.0", "id": i + 1, "method": method, "params": params
+        }));
+    }
+    let mut results = vec![Value::Null; calls.len() + 1];
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut answered = 0;
+    while answered < results.len() {
+        let line = lines.next().expect("surtr mcp stopped early").unwrap();
+        let v: Value = serde_json::from_str(&line).expect("stdout is only JSON-RPC");
+        if let Some(id) = v["id"].as_u64() {
+            results[id as usize] = v["result"].clone();
+            answered += 1;
+        }
+    }
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    results.remove(0);
+    results
+}
+
+/// The text of a tool result, parsed as JSON when it is JSON.
+fn tool_text(result: &Value) -> Value {
+    let text = result["content"][0]["text"].as_str().unwrap_or_default();
+    serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_owned()))
+}
+
+#[test]
+fn mcp_answers_read_tools() {
+    let call = |name: &str, arguments: Value| {
+        (
+            "tools/call",
+            serde_json::json!({ "name": name, "arguments": arguments }),
+        )
+    };
+    let r = mcp_session(
+        &["--mock", "mcp"],
+        &[
+            ("tools/list", serde_json::json!({})),
+            call(
+                "get_sensors",
+                serde_json::json!({ "kind": "temperature", "device": "cpu0" }),
+            ),
+            call("get_system_info", serde_json::json!({})),
+            call("get_throttle_reasons", serde_json::json!({})),
+            call("get_diagnostics", serde_json::json!({})),
+        ],
+    );
+    let names: Vec<&str> = r[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+    for tool in [
+        "get_system_info",
+        "get_sensors",
+        "get_capabilities",
+        "get_gpu_processes",
+        "get_throttle_reasons",
+        "query_history",
+        "get_diagnostics",
+    ] {
+        assert!(names.contains(&tool), "{tool} missing: {names:?}");
+    }
+
+    let sensors = tool_text(&r[1]);
+    let sensors = sensors.as_array().unwrap();
+    assert!(!sensors.is_empty());
+    assert!(
+        sensors
+            .iter()
+            .all(|s| s["kind"] == "temperature" && s["device"] == "cpu0")
+    );
+    assert!(sensors[0]["text"].as_str().unwrap().ends_with("°C"));
+
+    assert_eq!(tool_text(&r[2])["providers"][0], "mock");
+    assert!(tool_text(&r[3]).is_array());
+    let summary = tool_text(&r[4]);
+    assert!(
+        summary
+            .as_str()
+            .unwrap()
+            .contains("Surtr diagnostic summary"),
+        "{summary}"
+    );
+}
+
+#[test]
+fn mcp_history_lists_recorded_sensors() {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-mcp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("history.db");
+    let db = db.to_str().unwrap();
+    let call = |arguments: Value| {
+        (
+            "tools/call",
+            serde_json::json!({ "name": "query_history", "arguments": arguments }),
+        )
+    };
+
+    // Nothing recorded yet: an error result, not a protocol error.
+    let r = mcp_session(
+        &["--mock", "mcp", "--db", db],
+        &[call(serde_json::json!({}))],
+    );
+    assert_eq!(r[0]["isError"], true);
+
+    let (ok, _) = surtr(&[
+        "record",
+        "--mock",
+        "--count",
+        "2",
+        "--retain",
+        "0",
+        "--interval",
+        "0",
+        "--db",
+        db,
+    ]);
+    assert!(ok);
+    let r = mcp_session(
+        &["--mock", "mcp", "--db", db],
+        &[
+            call(serde_json::json!({})),
+            call(serde_json::json!({ "sensor": "cpu0/package/temp", "minutes": 5 })),
+            call(serde_json::json!({ "sensor": "no/such/sensor" })),
+        ],
+    );
+    let listed = tool_text(&r[0]);
+    let temp = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == "cpu0/package/temp")
+        .expect("recorded package temperature");
+    assert_eq!(temp["samples"], 2);
+    assert!(temp["first"].as_str().unwrap().starts_with("2026-01-01T"));
+
+    let query = tool_text(&r[1]);
+    assert_eq!(query["unit"], "celsius");
+    assert_eq!(query["bucket_seconds"], 2);
+    assert_eq!(r[2]["isError"], true);
+    let _ = std::fs::remove_dir_all(&dir);
+}
