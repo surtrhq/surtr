@@ -312,7 +312,7 @@ impl App {
         match k.code {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
-            KeyCode::Esc => self.quit = true,
+            // Esc doesn't quit: over SSH a split arrow key can look like one.
             KeyCode::Char('?') | KeyCode::F(1) => self.help = true,
             KeyCode::Char(':') => self.palette = Some(CommandPalette::default()),
             KeyCode::Char('p') if k.modifiers.contains(KeyModifiers::CONTROL) => {

@@ -584,7 +584,7 @@ fn draw_help(f: &mut Frame, area: Rect, p: &Palette) {
         (": or Ctrl+P", "command palette"),
         ("/", "filter sensors"),
         ("?", "this help"),
-        ("q, Esc", "quit"),
+        ("q, Ctrl+C", "quit"),
     ];
     let width = 44.min(area.width);
     let height = (keys.len() as u16 + 4).min(area.height);

@@ -20,6 +20,7 @@ use surtr_view::Theme;
 
 mod app;
 mod colors;
+mod keys;
 mod ui;
 
 pub use app::{App, Tab};
@@ -54,7 +55,16 @@ pub fn run(
             terminal.draw(|f| draw(f, &app, &palette))?;
             let wait = next.saturating_duration_since(Instant::now());
             if event::poll(wait)? {
-                app.handle(&event::read()?);
+                let next = |t| -> io::Result<_> {
+                    Ok(if event::poll(t)? {
+                        Some(event::read()?)
+                    } else {
+                        None
+                    })
+                };
+                for e in keys::reassemble(event::read()?, next)? {
+                    app.handle(&e);
+                }
             }
         }
         Ok(())
@@ -175,6 +185,9 @@ mod tests {
         assert_eq!(app.scroll, 1);
         press(&mut app, KeyCode::Left);
         assert_eq!((app.tab, app.scroll), (Tab::Capabilities, 0));
+        // Esc never quits: over SSH a split arrow key starts with a lone Esc.
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.quit);
         press(&mut app, KeyCode::Char('q'));
         assert!(app.quit);
     }
