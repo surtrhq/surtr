@@ -1282,3 +1282,61 @@ fn setup_with_nothing_to_fix() {
         assert!(out.starts_with("Nothing to set up"), "{out}");
     }
 }
+
+/// The agent skill must stay true to the CLI: valid frontmatter, and every
+/// concrete `surtr ... --json` command it names runs and prints JSON.
+#[test]
+fn agent_skill_matches_the_cli() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills/surtr/SKILL.md");
+    let text = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
+    let front = text
+        .strip_prefix("---\n")
+        .and_then(|t| t.split_once("\n---\n"))
+        .map(|(f, _)| f)
+        .expect("frontmatter");
+    assert!(front.lines().any(|l| l == "name: surtr"));
+    let description = front
+        .lines()
+        .find_map(|l| l.strip_prefix("description: "))
+        .expect("description");
+    assert!((50..=1024).contains(&description.len()));
+
+    // History and alerts read the data directory; keep the user's out of it.
+    let data = std::env::temp_dir().join(format!("surtr-cli-skill-{}", std::process::id()));
+    let mut checked = 0;
+    for command in text.split('`').skip(1).step_by(2) {
+        let Some(args) = command.strip_prefix("surtr ") else {
+            continue;
+        };
+        // Placeholders and commands that write or change things are skipped.
+        if !args.contains("--json") || args.contains('<') || args.contains('[') {
+            continue;
+        }
+        let mut argv = vec!["--mock"];
+        argv.extend(args.split_whitespace());
+        if argv[1] == "status" || argv[1] == "sensors" {
+            argv.extend(["--interval", "0"]);
+        }
+        if argv[1] == "watch" {
+            argv.extend(["--interval", "0"]);
+        }
+        let out = surtr_command()
+            .env("SURTR_DATA_DIR", &data)
+            .args(&argv)
+            .output()
+            .unwrap();
+        // status exits 2 on the mock machine (warning); anything but an error
+        // running surtr is fine.
+        assert_ne!(out.status.code(), Some(1), "{args}: {out:?}");
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        let first = stdout.lines().next().unwrap_or_default();
+        assert!(
+            serde_json::from_str::<Value>(&stdout).is_ok()
+                || serde_json::from_str::<Value>(first).is_ok(),
+            "{args}: {stdout}"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 8, "only {checked} commands checked");
+    let _ = std::fs::remove_dir_all(&data);
+}

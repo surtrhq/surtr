@@ -43,6 +43,18 @@ cargo run -p surtr-cli -- info          # this machine
 cargo run -p surtr-cli -- --mock --json # the mock provider, as JSON
 ```
 
+## Using Surtr with AI agents
+
+- **Coding agents with a shell** (Claude Code, Codex, Cursor, ...): install
+  the [agent skill](skills/surtr/SKILL.md). For Claude Code, copy
+  `skills/surtr` to `~/.claude/skills/surtr` (all projects) or to
+  `.claude/skills/surtr` in one project; other agents that support the Agent
+  Skills format have their own skills folder. The skill teaches the agent
+  which `surtr ... --json` command answers which question, how to read the
+  results, and never to run `surtr setup` without asking.
+- **Chat clients** (Claude Desktop and others): use the MCP server, see
+  [docs/mcp.md](docs/mcp.md).
+
 ## License
 
 Licensed under either of
