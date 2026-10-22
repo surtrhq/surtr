@@ -94,6 +94,7 @@ after the problem recurs.
 
 ## Without a shell
 
-Chat clients without shell access can use the MCP server instead: the
-`surtr mcp` command, set up as described in `docs/mcp.md` of the Surtr
-repository. It offers the same read-only data as tools.
+Chat clients without shell access can use the MCP server instead. It offers
+the same read-only data as tools. `surtr mcp config <client>` (`claude-code`,
+`claude-desktop`, `cursor` or `vscode`) prints the exact setup to give the
+user; it only prints and changes nothing.

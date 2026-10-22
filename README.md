@@ -52,7 +52,8 @@ cargo run -p surtr-cli -- --mock --json # the mock provider, as JSON
   Skills format have their own skills folder. The skill teaches the agent
   which `surtr ... --json` command answers which question, how to read the
   results, and never to run `surtr setup` without asking.
-- **Chat clients** (Claude Desktop and others): use the MCP server, see
+- **Chat clients** (Claude Desktop, Cursor, VS Code and others): use the MCP
+  server. `surtr mcp config <client>` prints the exact setup; see
   [docs/mcp.md](docs/mcp.md).
 
 ## License

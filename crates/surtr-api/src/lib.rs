@@ -92,15 +92,15 @@ async fn sensors(State(api): State<Api>, Query(filter): Query<SensorFilter>) -> 
 }
 
 async fn capabilities(State(api): State<Api>) -> Response {
-    answer(&api, Hub::capabilities).await
+    answer(&api, answers::capabilities).await
 }
 
 async fn gpu_processes(State(api): State<Api>) -> Response {
-    answer(&api, Hub::gpu_processes).await
+    answer(&api, answers::gpu_processes).await
 }
 
 async fn throttle(State(api): State<Api>) -> Response {
-    answer(&api, Hub::throttle_reasons).await
+    answer(&api, answers::throttle).await
 }
 
 async fn history(State(api): State<Api>, Query(query): Query<HistoryQuery>) -> Response {

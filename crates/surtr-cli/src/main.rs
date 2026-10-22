@@ -22,6 +22,7 @@ mod diag;
 mod export;
 mod history;
 mod logging;
+mod mcp_config;
 mod notify;
 mod remote;
 mod render;
@@ -170,6 +171,8 @@ enum Command {
         /// per-user data directory).
         #[arg(long)]
         db: Option<PathBuf>,
+        #[command(subcommand)]
+        command: Option<McpCommand>,
     },
     /// Print the bearer token that clients of `surtr serve --mcp` and
     /// `--api` must send.
@@ -338,6 +341,15 @@ fn config_command(
             Ok(format!("Wrote {shown} with every setting commented out.\n"))
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+enum McpCommand {
+    /// Print the setup for an MCP client, with this surtr's full path.
+    Config {
+        /// The client to set up.
+        client: mcp_config::Client,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -722,7 +734,11 @@ fn run(
             };
             Ok(token + "\n")
         }
-        Command::Mcp { db } => {
+        Command::Mcp {
+            command: Some(McpCommand::Config { client }),
+            ..
+        } => Ok(mcp_config::text(*client, &std::env::current_exe()?)),
+        Command::Mcp { db, command: None } => {
             let server = surtr_mcp::Server::new(
                 Arc::clone(hub),
                 db_path(db.as_ref(), settings)?,

@@ -22,7 +22,7 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 use serde_json::Value;
-use surtr_api::answers::{self, HistoryQuery, SensorFilter, data};
+use surtr_api::answers::{self, HistoryQuery, SensorFilter};
 use surtr_core::Hub;
 
 mod audit;
@@ -115,68 +115,118 @@ impl Server {
             .map_err(|e| e.to_string())
     }
 
+    /// A JSON value from `f` as a tool result: structured content plus the
+    /// same JSON as text, with the home directory redacted in both.
+    async fn answer(
+        &self,
+        f: impl FnOnce(&Hub) -> Result<Value, String> + Send + 'static,
+    ) -> Result<CallToolResult, String> {
+        let value = self.blocking(f).await??;
+        Ok(CallToolResult::structured(answers::redacted(&value)?))
+    }
+
     #[tool(
         description = "Operating system, CPU, GPUs and memory of this machine, plus the \
-                       hardware providers in use."
+                       hardware providers in use.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
-    async fn get_system_info(&self) -> Result<String, String> {
-        data(&self.blocking(answers::system).await?)
+    async fn get_system_info(&self) -> Result<CallToolResult, String> {
+        self.answer(|hub| Ok(answers::system(hub))).await
     }
 
     #[tool(
         description = "Current sensor values: temperatures, clocks, loads, power, fans and \
-                       memory use. Filter by device or kind to keep the answer short."
+                       memory use. Filter by device or kind to keep the answer short.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     async fn get_sensors(
         &self,
         Parameters(filter): Parameters<SensorFilter>,
-    ) -> Result<String, String> {
-        let samples = self.blocking(Hub::read).await?;
-        data(&answers::sensors(samples, &filter))
+    ) -> Result<CallToolResult, String> {
+        self.answer(move |hub| Ok(answers::sensors(hub.read(), &filter)))
+            .await
     }
 
     #[tool(
         description = "What Surtr can and cannot do on this machine (sensors, GPU details, \
-                       history and so on), with the reason and the fix for anything missing."
+                       history and so on), with the reason and the fix for anything missing.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
-    async fn get_capabilities(&self) -> Result<String, String> {
-        data(&self.blocking(Hub::capabilities).await?)
+    async fn get_capabilities(&self) -> Result<CallToolResult, String> {
+        self.answer(|hub| Ok(answers::capabilities(hub))).await
     }
 
-    #[tool(description = "Processes using each GPU, with their GPU memory.")]
-    async fn get_gpu_processes(&self) -> Result<String, String> {
-        data(&self.blocking(Hub::gpu_processes).await?)
+    #[tool(
+        description = "Processes using each GPU, with their GPU memory.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn get_gpu_processes(&self) -> Result<CallToolResult, String> {
+        self.answer(|hub| Ok(answers::gpu_processes(hub))).await
     }
 
     #[tool(
         description = "Why each GPU runs below its potential clock right now (power cap, \
-                       thermal limit and so on)."
+                       thermal limit and so on).",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
-    async fn get_throttle_reasons(&self) -> Result<String, String> {
-        data(&self.blocking(Hub::throttle_reasons).await?)
+    async fn get_throttle_reasons(&self) -> Result<CallToolResult, String> {
+        self.answer(|hub| Ok(answers::throttle(hub))).await
     }
 
     #[tool(
         description = "Recorded sensor history from `surtr serve` or `surtr record`: \
                        average, minimum and maximum per time bucket. Without `sensor`, \
-                       lists the recorded sensors and their time spans."
+                       lists the recorded sensors and their time spans.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     async fn query_history(
         &self,
         Parameters(query): Parameters<HistoryQuery>,
-    ) -> Result<String, String> {
+    ) -> Result<CallToolResult, String> {
         let db = self.db.clone();
-        data(
-            &self
-                .blocking(move |_| answers::history(&db, &query))
-                .await??,
-        )
+        self.answer(move |_| answers::history(&db, &query)).await
     }
 
     #[tool(
         description = "The redacted `surtr diag` summary: versions, providers, health and \
                        recent warnings, as Markdown. Contains no serial numbers, addresses \
-                       or user names."
+                       or user names.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     async fn get_diagnostics(&self) -> Result<String, String> {
         let diagnostics = Arc::clone(&self.diagnostics);
@@ -288,13 +338,17 @@ impl ServerHandler for Server {
                 None,
             ))
         } else {
-            let text = match uri.as_str() {
-                "surtr://system" => Some(self.get_system_info().await),
+            let answer: Option<fn(&Hub) -> Value> = match uri.as_str() {
+                "surtr://system" => Some(answers::system),
                 "surtr://sensors/live" => {
-                    Some(self.get_sensors(Parameters(SensorFilter::default())).await)
+                    Some(|hub| answers::sensors(hub.read(), &SensorFilter::default()))
                 }
-                "surtr://capabilities" => Some(self.get_capabilities().await),
+                "surtr://capabilities" => Some(answers::capabilities),
                 _ => None,
+            };
+            let text = match answer {
+                Some(f) => Some(self.blocking(f).await.and_then(|v| answers::data(&v))),
+                None => None,
             };
             match text {
                 Some(Ok(text)) => Ok(text),

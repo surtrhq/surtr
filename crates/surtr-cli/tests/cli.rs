@@ -799,9 +799,18 @@ fn mcp_answers_read_tools() {
     ] {
         assert!(names.contains(&tool), "{tool} missing: {names:?}");
     }
+    // Every tool says it only reads, so clients can approve it once.
+    for tool in r[0]["tools"].as_array().unwrap() {
+        let hints = &tool["annotations"];
+        assert_eq!(hints["readOnlyHint"], true, "{tool}");
+        assert_eq!(hints["openWorldHint"], false, "{tool}");
+    }
 
+    // Structured content and the text carry the same JSON object.
+    assert!(r[1]["structuredContent"].is_object(), "{}", r[1]);
+    assert_eq!(tool_text(&r[1]), r[1]["structuredContent"]);
     let sensors = tool_text(&r[1]);
-    let sensors = sensors.as_array().unwrap();
+    let sensors = sensors["sensors"].as_array().unwrap();
     assert!(!sensors.is_empty());
     assert!(
         sensors
@@ -811,7 +820,7 @@ fn mcp_answers_read_tools() {
     assert!(sensors[0]["text"].as_str().unwrap().ends_with("°C"));
 
     assert_eq!(tool_text(&r[2])["providers"][0], "mock");
-    assert!(tool_text(&r[3]).is_array());
+    assert!(tool_text(&r[3])["throttle"].is_array());
     let summary = tool_text(&r[4]);
     assert!(
         summary
@@ -877,7 +886,7 @@ fn mcp_history_lists_recorded_sensors() {
         ],
     );
     let listed = tool_text(&r[0]);
-    let temp = listed
+    let temp = listed["sensors"]
         .as_array()
         .unwrap()
         .iter()
@@ -935,7 +944,7 @@ fn mcp_resources_and_prompts() {
     assert_eq!(contents["mimeType"], "application/json");
     let sensors: Value = serde_json::from_str(contents["text"].as_str().unwrap()).unwrap();
     assert!(
-        sensors
+        sensors["sensors"]
             .as_array()
             .unwrap()
             .iter()
@@ -1244,7 +1253,7 @@ fn serve_answers_the_rest_api() {
 
     let r = http_get_with(&addr, "/api/v1/sensors?kind=temperature&device=cpu0", &auth);
     let sensors = body(&r);
-    let sensors = sensors.as_array().unwrap();
+    let sensors = sensors["sensors"].as_array().unwrap();
     assert!(!sensors.is_empty());
     assert!(sensors.iter().all(|s| s["kind"] == "temperature"));
 
@@ -1262,7 +1271,8 @@ fn serve_answers_the_rest_api() {
     let live = websocket_first_text(&addr, "/api/v1/live?device=gpu0", &bearer);
     let live: Value = serde_json::from_str(&live).unwrap();
     assert!(
-        live.as_array()
+        live["sensors"]
+            .as_array()
             .unwrap()
             .iter()
             .all(|s| s["device"] == "gpu0")

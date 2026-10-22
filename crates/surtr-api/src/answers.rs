@@ -1,5 +1,6 @@
 //! The JSON every machine-facing interface answers with (the MCP tools and
-//! the REST API), so they never drift apart.
+//! the REST API), so they never drift apart. Every answer is a JSON object
+//! (MCP's structured content must be one), keyed like the CLI's `--json`.
 
 use std::path::Path;
 
@@ -80,6 +81,11 @@ pub fn data(value: &impl Serialize) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// `value` with the home directory redacted, as JSON.
+pub fn redacted(value: &impl Serialize) -> Result<Value, String> {
+    serde_json::from_str(&data(value)?).map_err(|e| e.to_string())
+}
+
 fn kind_name(kind: SensorKind) -> String {
     match serde_json::to_value(kind) {
         Ok(Value::String(s)) => s,
@@ -93,8 +99,13 @@ pub fn system(hub: &Hub) -> Value {
     json!({ "system": hub.system_info(), "providers": providers })
 }
 
-/// The samples that pass `filter`.
-pub fn sensors(samples: Vec<Sample>, filter: &SensorFilter) -> Vec<Reading> {
+/// The samples that pass `filter`: `{"sensors": [...]}`.
+pub fn sensors(samples: Vec<Sample>, filter: &SensorFilter) -> Value {
+    json!({ "sensors": readings(samples, filter) })
+}
+
+/// The samples that pass `filter`, as readings.
+pub fn readings(samples: Vec<Sample>, filter: &SensorFilter) -> Vec<Reading> {
     samples
         .into_iter()
         .filter(|s| {
@@ -111,8 +122,24 @@ pub fn sensors(samples: Vec<Sample>, filter: &SensorFilter) -> Vec<Reading> {
         .collect()
 }
 
-/// Recorded history from `db`: without a sensor, the list of recorded
-/// sensors; with one, avg/min/max buckets over the requested range.
+/// What Surtr can and cannot read: `{"capabilities": [...]}`.
+pub fn capabilities(hub: &Hub) -> Value {
+    json!({ "capabilities": hub.capabilities() })
+}
+
+/// Processes using each GPU: `{"processes": [...]}`.
+pub fn gpu_processes(hub: &Hub) -> Value {
+    json!({ "processes": hub.gpu_processes() })
+}
+
+/// Why each GPU is below its potential clock: `{"throttle": [...]}`.
+pub fn throttle(hub: &Hub) -> Value {
+    json!({ "throttle": hub.throttle_reasons() })
+}
+
+/// Recorded history from `db`: without a sensor, the recorded sensors
+/// (`{"sensors": [...]}`); with one, avg/min/max buckets over the requested
+/// range.
 pub fn history(db: &Path, q: &HistoryQuery) -> Result<Value, String> {
     if !db.exists() {
         return Err("no history recorded yet; run `surtr serve` or `surtr record`".to_owned());
@@ -120,7 +147,7 @@ pub fn history(db: &Path, q: &HistoryQuery) -> Result<Value, String> {
     let store = Store::open(db).map_err(|e| e.to_string())?;
     let stored = store.sensors().map_err(|e| e.to_string())?;
     let Some(sensor) = &q.sensor else {
-        return Ok(stored
+        let list: Vec<Value> = stored
             .iter()
             .map(|s| {
                 json!({
@@ -134,7 +161,8 @@ pub fn history(db: &Path, q: &HistoryQuery) -> Result<Value, String> {
                     "last": s.last.map(format::iso_utc),
                 })
             })
-            .collect());
+            .collect();
+        return Ok(json!({ "sensors": list }));
     };
     let matches: Vec<_> = stored
         .iter()

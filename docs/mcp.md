@@ -13,7 +13,12 @@ agent; they are not part of this server today.
 
 ## Setup
 
-Claude Code:
+The easiest way: `surtr mcp config <client>` prints the exact setup for
+`claude-code`, `claude-desktop`, `cursor` or `vscode`, with the full path of
+your `surtr`, so the client finds it even if `surtr` is not on its `PATH`.
+It only prints; it never edits the client's files.
+
+By hand, Claude Code:
 
 ```sh
 claude mcp add surtr -- surtr mcp
@@ -30,6 +35,10 @@ Claude Desktop (`claude_desktop_config.json`):
 ```
 
 Use the full path to `surtr` if it is not on the `PATH` the client sees.
+
+Every tool is marked read-only (`readOnlyHint`), so clients that support it
+can approve Surtr once instead of asking on every call. Results come as
+structured content (a JSON object) and as the same JSON in text.
 
 Running `surtr serve` as well is recommended: the MCP server then answers from
 the daemon's latest readings instead of polling the hardware itself, and
