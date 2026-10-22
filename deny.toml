@@ -15,3 +15,14 @@ multiple-versions = "warn"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+
+[advisories]
+# zbus_names, zvariant and zvariant_derive were merged into zbus 6; the
+# notify-rust release we use (Linux desktop notifications) still depends on
+# zbus 5. Unmaintained notices, not vulnerabilities. Remove once notify-rust
+# moves to zbus 6.
+ignore = [
+    { id = "RUSTSEC-2026-0370", reason = "unmaintained zbus 5 sub-crate via notify-rust; merged into zbus 6" },
+    { id = "RUSTSEC-2026-0371", reason = "unmaintained zbus 5 sub-crate via notify-rust; merged into zbus 6" },
+    { id = "RUSTSEC-2026-0372", reason = "unmaintained zbus 5 sub-crate via notify-rust; merged into zbus 6" },
+]
