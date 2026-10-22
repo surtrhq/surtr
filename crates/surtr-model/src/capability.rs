@@ -84,8 +84,9 @@ pub enum Support {
     },
 }
 
-/// How the user could make an unavailable feature work. Surtr shows it and
-/// never runs it (plan, section 4 and issue #24).
+/// How the user could make an unavailable feature work. Front ends show it;
+/// only `surtr setup` runs the command, after the user confirms it (plan,
+/// section 4 and issue #24).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Remedy {
     /// What to do, as one sentence.

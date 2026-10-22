@@ -1271,3 +1271,14 @@ fn serve_answers_the_rest_api() {
     assert!(child.wait().unwrap().success());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn setup_with_nothing_to_fix() {
+    // The mock knows no fixes, so there is nothing to show or run, with or
+    // without --dry-run, and never a prompt.
+    for args in [&["--mock", "setup"][..], &["--mock", "setup", "--dry-run"]] {
+        let (ok, out) = surtr(args);
+        assert!(ok);
+        assert!(out.starts_with("Nothing to set up"), "{out}");
+    }
+}

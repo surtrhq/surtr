@@ -26,6 +26,7 @@ mod notify;
 mod remote;
 mod render;
 mod serve;
+mod setup;
 mod style;
 mod watch;
 
@@ -93,6 +94,13 @@ enum Command {
     },
     /// Show what Surtr can and cannot read on this machine.
     Caps,
+    /// Fix what `surtr caps` reports as missing: shows each fix and runs
+    /// the ones you confirm (loading a kernel module, installing a package).
+    Setup {
+        /// Only show the fixes; run nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Read every sensor once and show the values.
     Sensors {
         /// Milliseconds between the priming read and the reported one; rate
@@ -624,6 +632,7 @@ fn run(
             surtr_tui::run(hub, interval, theme, &process_name)?;
             Ok(String::new())
         }
+        Command::Setup { dry_run } => Ok(setup::run(&hub.capabilities(), *dry_run)?),
         Command::Caps => {
             let capabilities = hub.capabilities();
             out(
