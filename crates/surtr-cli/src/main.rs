@@ -162,6 +162,8 @@ enum Command {
         /// per-user data directory).
         #[arg(long)]
         db: Option<PathBuf>,
+        #[command(subcommand)]
+        command: Option<McpCommand>,
     },
     /// Run in the background: poll sensors, record history and, with
     /// --metrics, serve Prometheus metrics. Stop with Ctrl+C.
@@ -189,6 +191,10 @@ enum Command {
         /// No desktop notifications for alerts (overrides alerts.notify).
         #[arg(long)]
         no_notify: bool,
+        /// Also serve MCP over HTTP at this loopback address, for example
+        /// 127.0.0.1:7878; clients need the token from `surtr mcp token`.
+        #[arg(long)]
+        mcp: Option<std::net::SocketAddr>,
     },
     /// Record every sensor into the history database until stopped (Ctrl+C)
     /// or until --count samples are stored.
@@ -310,6 +316,16 @@ fn config_command(
             Ok(format!("Wrote {shown} with every setting commented out.\n"))
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+enum McpCommand {
+    /// Print the bearer token that MCP clients need for `surtr serve --mcp`.
+    Token {
+        /// Make a new token; clients using the old one stop working.
+        #[arg(long)]
+        new: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -684,7 +700,19 @@ fn run(
             }
             out(json!({ "alerts": recent }), text)
         }
-        Command::Mcp { db } => {
+        Command::Mcp {
+            db,
+            command: Some(McpCommand::Token { new }),
+        } => {
+            let file = surtr_mcp::token::path(&db_path(db.as_ref(), settings)?);
+            let token = if *new {
+                surtr_mcp::token::create(&file)?
+            } else {
+                surtr_mcp::token::load_or_create(&file)?
+            };
+            Ok(token + "\n")
+        }
+        Command::Mcp { db, command: None } => {
             let server = surtr_mcp::Server::new(
                 Arc::clone(hub),
                 db_path(db.as_ref(), settings)?,
@@ -705,6 +733,7 @@ fn run(
             metrics,
             metrics_remote,
             no_notify,
+            mcp,
         } => {
             let retain_ms = history::parse_duration_ms(
                 retain
@@ -722,6 +751,7 @@ fn run(
                     metrics: *metrics,
                     metrics_remote: *metrics_remote,
                     notify: settings.alerts.notify() && !*no_notify,
+                    mcp: *mcp,
                 },
             )
         }

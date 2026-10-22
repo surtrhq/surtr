@@ -954,3 +954,163 @@ fn mcp_resources_and_prompts() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// POSTs JSON to `addr` and returns the raw response (status line, headers
+/// and body). Event streams may stay open, so reading stops at `until`, at
+/// end of stream, or after 5 seconds.
+fn http_post(addr: &str, path: &str, headers: &[(&str, &str)], body: &str, until: &str) -> String {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_millis(500)))
+        .unwrap();
+    let mut request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\
+         Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
+         Content-Length: {}\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    request.push_str(body);
+    stream.write_all(request.as_bytes()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut response = Vec::new();
+    let mut buf = [0u8; 4096];
+    while std::time::Instant::now() < deadline {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => response.extend_from_slice(&buf[..n]),
+            Err(_) => {}
+        }
+        if !until.is_empty() && String::from_utf8_lossy(&response).contains(until) {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&response).into_owned()
+}
+
+#[test]
+fn serve_answers_mcp_over_http_with_a_token() {
+    use std::io::{BufRead, BufReader};
+    let dir = std::env::temp_dir().join(format!("surtr-cli-mcp-http-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("history.db");
+    let db = db.to_str().unwrap();
+
+    // Only loopback addresses are accepted.
+    let (code, _) = surtr_code(&[
+        "--mock",
+        "serve",
+        "--mcp",
+        "0.0.0.0:0",
+        "--count",
+        "1",
+        "--db",
+        db,
+    ]);
+    assert_eq!(code, Some(1));
+
+    let mut child = surtr_command()
+        .args(["--mock", "serve", "--mcp", "127.0.0.1:0", "--count", "60"])
+        .args(["--interval", "100", "--retain", "0", "--db", db])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut addr = None;
+    let mut line = String::new();
+    while stderr.read_line(&mut line).unwrap() > 0 {
+        if let Some(rest) = line.trim().strip_prefix("Serving MCP on http://") {
+            addr = rest.split_once("/mcp").map(|(a, _)| a.to_owned());
+            break;
+        }
+        line.clear();
+    }
+    let addr = addr.expect("serve printed its MCP address");
+    let (ok, token) = surtr(&["mcp", "--db", db, "token"]);
+    assert!(ok);
+    let token = token.trim();
+    assert_eq!(token.len(), 64);
+    let bearer = format!("Bearer {token}");
+
+    let init = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "surtr-http-test", "version": "0" }
+        }
+    })
+    .to_string();
+    let status = |r: &str| r.split(' ').nth(1).unwrap_or_default().to_owned();
+
+    // No token, a wrong token, and a web page's Origin are all refused.
+    assert_eq!(status(&http_post(&addr, "/mcp", &[], &init, "")), "401");
+    let wrong = format!("Bearer {}", "0".repeat(64));
+    assert_eq!(
+        status(&http_post(
+            &addr,
+            "/mcp",
+            &[("Authorization", &wrong)],
+            &init,
+            ""
+        )),
+        "401"
+    );
+    let from_page = http_post(
+        &addr,
+        "/mcp",
+        &[
+            ("Authorization", &bearer),
+            ("Origin", "https://evil.example"),
+        ],
+        &init,
+        "",
+    );
+    assert_eq!(status(&from_page), "403", "{from_page}");
+
+    // With the token: handshake, then a tool call answered from serve's
+    // latest read.
+    let r = http_post(
+        &addr,
+        "/mcp",
+        &[("Authorization", &bearer)],
+        &init,
+        "serverInfo",
+    );
+    assert_eq!(status(&r), "200", "{r}");
+    assert!(r.contains("\"name\":\"surtr\""), "{r}");
+    let session = r
+        .lines()
+        .find_map(|l| {
+            let (name, value) = l.split_once(':')?;
+            name.eq_ignore_ascii_case("mcp-session-id")
+                .then(|| value.trim().to_owned())
+        })
+        .expect("session id");
+    let headers = [
+        ("Authorization", bearer.as_str()),
+        ("Mcp-Session-Id", session.as_str()),
+        ("MCP-Protocol-Version", "2025-06-18"),
+    ];
+    let notified = http_post(
+        &addr,
+        "/mcp",
+        &headers,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        "",
+    );
+    assert_eq!(status(&notified), "202", "{notified}");
+    let call = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_sensors","arguments":{"kind":"temperature","device":"cpu0"}}}"#;
+    let r = http_post(&addr, "/mcp", &headers, call, "cpu0/package/temp");
+    assert!(r.contains("cpu0/package/temp"), "{r}");
+
+    assert!(child.wait().unwrap().success());
+    let audit = std::fs::read_to_string(dir.join("mcp-audit.jsonl")).unwrap();
+    assert!(audit.contains("surtr-http-test 0"), "{audit}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

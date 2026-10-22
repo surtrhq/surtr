@@ -30,6 +30,8 @@ use surtr_store::Store;
 use surtr_view::format;
 
 mod audit;
+pub mod http;
+pub mod token;
 use audit::{Audit, Entry};
 
 /// Instructions every client receives with the server's identity.

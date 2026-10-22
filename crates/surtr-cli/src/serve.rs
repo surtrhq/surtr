@@ -15,9 +15,12 @@ use std::{
 
 use axum::{Router, http::header, routing::get};
 use serde_json::{Value, json};
+use surtr_backend::{Provider, ProviderError};
 use surtr_backend_native::process_name;
 use surtr_core::{Hub, Sample, alerts, paths};
-use surtr_model::{GpuProcess, ThrottleState, Timestamp};
+use surtr_model::{
+    Capabilities, GpuProcess, SensorDescriptor, SensorReading, SystemInfo, ThrottleState, Timestamp,
+};
 use surtr_store::Store;
 use surtr_view::Level;
 use tokio::sync::watch;
@@ -38,6 +41,8 @@ pub struct Options {
     pub metrics_remote: bool,
     /// Show desktop notifications for fired alerts.
     pub notify: bool,
+    /// Where to serve MCP over HTTP, if anywhere (loopback only).
+    pub mcp: Option<SocketAddr>,
 }
 
 /// The latest read, which IPC clients get instead of reading the hardware
@@ -47,6 +52,62 @@ struct Snapshot {
     samples: Vec<Sample>,
     throttle: Vec<ThrottleState>,
     processes: Vec<GpuProcess>,
+}
+
+/// The snapshot seen as a provider, so the MCP server answers from the
+/// daemon's latest read instead of polling the hardware a second time.
+struct SnapshotProvider {
+    snapshot: Arc<Mutex<Snapshot>>,
+    system: SystemInfo,
+    capabilities: Capabilities,
+    id: String,
+}
+
+impl SnapshotProvider {
+    fn with<T>(&self, f: impl FnOnce(&Snapshot) -> T) -> T {
+        f(&self.snapshot.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+}
+
+impl Provider for SnapshotProvider {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        self.capabilities.clone()
+    }
+
+    fn system_info(&self) -> Result<SystemInfo, ProviderError> {
+        Ok(self.system.clone())
+    }
+
+    fn sensors(&self) -> Result<Vec<SensorDescriptor>, ProviderError> {
+        Ok(self.with(|s| s.samples.iter().map(|x| x.descriptor.clone()).collect()))
+    }
+
+    fn read_sensors(&self) -> Result<Vec<SensorReading>, ProviderError> {
+        Ok(self.with(|s| {
+            s.samples
+                .iter()
+                .filter_map(|x| {
+                    Some(SensorReading {
+                        value: x.value?,
+                        at: x.at?,
+                        id: x.descriptor.id.clone(),
+                    })
+                })
+                .collect()
+        }))
+    }
+
+    fn gpu_processes(&self) -> Result<Vec<GpuProcess>, ProviderError> {
+        Ok(self.with(|s| s.processes.clone()))
+    }
+
+    fn throttle_reasons(&self) -> Result<Vec<ThrottleState>, ProviderError> {
+        Ok(self.with(|s| s.throttle.clone()))
+    }
 }
 
 /// Where `surtr serve` appends alerts: `alerts.jsonl` next to the database.
@@ -114,6 +175,16 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
         );
     }
 
+    if let Some(addr) = opts.mcp
+        && !addr.ip().is_loopback()
+    {
+        return Err(format!(
+            "MCP is served on loopback addresses only, such as 127.0.0.1:7878, not {addr}; \
+             use an SSH tunnel to reach it from another machine"
+        )
+        .into());
+    }
+
     // One serve per database: a second one would double-poll the hardware.
     let lock_path = opts.db.with_extension("lock");
     if let Some(dir) = lock_path.parent() {
@@ -139,9 +210,9 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
     }));
     let metrics = Arc::new(Mutex::new(String::new()));
 
-    // IPC and metrics share one small runtime on its own thread.
+    // IPC, metrics and MCP share one small runtime on its own thread.
     let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
+        .enable_all()
         .build()?;
     let listener = match opts.metrics {
         Some(addr) => {
@@ -176,6 +247,30 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         providers: hub.provider_ids().into_iter().map(str::to_owned).collect(),
     };
+    let mcp = match opts.mcp {
+        Some(addr) => {
+            let listener = runtime.block_on(tokio::net::TcpListener::bind(addr))?;
+            let mut snapshot_hub = Hub::new();
+            snapshot_hub.add(Box::new(SnapshotProvider {
+                snapshot: Arc::clone(&snapshot),
+                system: system.clone(),
+                capabilities: capabilities.clone(),
+                id: hub.provider_ids().join(", "),
+            }));
+            let server = surtr_mcp::Server::new(
+                Arc::new(snapshot_hub),
+                opts.db.clone(),
+                Arc::new(|hub| crate::diag::build(hub).summary),
+            );
+            let token = surtr_mcp::token::load_or_create(&surtr_mcp::token::path(&opts.db))?;
+            eprintln!(
+                "Serving MCP on http://{}/mcp (bearer token: surtr mcp token)",
+                listener.local_addr()?
+            );
+            Some((listener, surtr_mcp::http::router(server, token)))
+        }
+        None => None,
+    };
     let answer = handler(Arc::clone(&snapshot), json!(system), json!(capabilities));
     let (stop, stop_rx) = watch::channel(false);
     let server = thread::spawn(move || {
@@ -196,7 +291,22 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
                     eprintln!("surtr: warning: metrics server stopped: {e}");
                 }
             };
-            tokio::join!(ipc, http);
+            let mcp = async {
+                if let Some((listener, (router, sessions))) = mcp {
+                    let rx = stop_rx.clone();
+                    let shutdown = async move {
+                        stopped(rx).await;
+                        sessions.stop();
+                    };
+                    if let Err(e) = axum::serve(listener, router)
+                        .with_graceful_shutdown(shutdown)
+                        .await
+                    {
+                        eprintln!("surtr: warning: MCP server stopped: {e}");
+                    }
+                }
+            };
+            tokio::join!(ipc, http, mcp);
         });
     });
 

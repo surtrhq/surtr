@@ -14,10 +14,13 @@ surtr-store.workspace = true
 surtr-view.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rmcp = { version = "3.6", default-features = false, features = ["server", "macros", "transport-io"] }
+rmcp = { version = "3.6", default-features = false, features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
 schemars = "1"
 tokio = { version = "1", default-features = false, features = ["rt"] }
 tracing = "0.1"
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }
+getrandom = "0.4"
+tokio-util = "0.7"
 
 [dev-dependencies]
 surtr-backend = { workspace = true, features = ["mock"] }

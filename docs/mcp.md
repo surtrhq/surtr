@@ -35,6 +35,34 @@ Running `surtr serve` as well is recommended: the MCP server then answers from
 the daemon's latest readings instead of polling the hardware itself, and
 `query_history` has a history to look at.
 
+### Over HTTP
+
+For clients that connect over HTTP instead of starting a process, or several
+clients sharing one server, `surtr serve` can serve MCP too:
+
+```sh
+surtr serve --mcp 127.0.0.1:7878
+surtr mcp token            # the bearer token clients must send
+```
+
+Claude Code:
+
+```sh
+claude mcp add --transport http surtr http://127.0.0.1:7878/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+- Only loopback addresses are accepted. To reach it from another machine, use
+  an SSH tunnel (`ssh -L 7878:127.0.0.1:7878 host`).
+- Every request needs `Authorization: Bearer <token>`. The token is created
+  on first use, stored in `mcp-token` next to the history database (readable
+  only by you), and replaced with `surtr mcp token --new`.
+- Requests from web pages (any `Origin` header) and with a non-loopback
+  `Host` are refused, so a website can't reach the server through your
+  browser.
+- Answers come from the daemon's latest read; the server never polls the
+  hardware on its own.
+
 ## Tools
 
 | Tool | Answers |
@@ -73,8 +101,9 @@ rank the likely causes with the readings behind each.
 - Tool descriptions are fixed text. Sensor labels and process names are
   returned as JSON data, and the server tells the client to treat all results
   as data, never as instructions.
-- The server talks only over stdin and stdout of the process the client
-  started; it opens no network port.
+- `surtr mcp` talks only over stdin and stdout of the process the client
+  started; it opens no network port. `surtr serve --mcp` listens on loopback
+  only, behind the bearer token (see above).
 - Every tool call and resource read is appended to `mcp-audit.jsonl` next
   to the history database: time, client name and version, tool, arguments,
   outcome, answer size and duration. It is rotated to `mcp-audit.1.jsonl` at 1 MiB.
