@@ -892,3 +892,65 @@ fn mcp_history_lists_recorded_sensors() {
     assert_eq!(r[2]["isError"], true);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn mcp_resources_and_prompts() {
+    let dir = std::env::temp_dir().join(format!("surtr-cli-mcp-res-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("history.db");
+    let r = mcp_session(
+        &["--mock", "mcp", "--db", db.to_str().unwrap()],
+        &[
+            ("resources/list", serde_json::json!({})),
+            (
+                "resources/read",
+                serde_json::json!({ "uri": "surtr://sensors/live" }),
+            ),
+            ("prompts/list", serde_json::json!({})),
+            (
+                "prompts/get",
+                serde_json::json!({
+                    "name": "diagnose_instability",
+                    "arguments": { "symptom": "it freezes in games" }
+                }),
+            ),
+        ],
+    );
+    let uris: Vec<&str> = r[0]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|x| x["uri"].as_str())
+        .collect();
+    assert_eq!(
+        uris,
+        [
+            "surtr://system",
+            "surtr://sensors/live",
+            "surtr://capabilities"
+        ]
+    );
+
+    let contents = &r[1]["contents"][0];
+    assert_eq!(contents["mimeType"], "application/json");
+    let sensors: Value = serde_json::from_str(contents["text"].as_str().unwrap()).unwrap();
+    assert!(
+        sensors
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == "cpu0/package/temp")
+    );
+
+    assert_eq!(r[2]["prompts"][0]["name"], "diagnose_instability");
+    let text = r[3]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(text.starts_with("My computer is unstable: it freezes in games\n\n"));
+    assert!(text.contains("get_throttle_reasons"));
+
+    let audit = std::fs::read_to_string(dir.join("mcp-audit.jsonl")).unwrap();
+    assert!(
+        audit.contains("\"resource surtr://sensors/live\""),
+        "{audit}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

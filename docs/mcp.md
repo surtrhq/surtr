@@ -50,6 +50,22 @@ the daemon's latest readings instead of polling the hardware itself, and
 Results are JSON (Markdown for `get_diagnostics`). Times are UTC ISO 8601.
 Each sensor value also comes formatted with its unit (`"text": "56.0 °C"`).
 
+## Resources and prompts
+
+Clients that show resources can attach these to a conversation; each holds
+the same JSON as the tool of the same name:
+
+| Resource | Same as |
+|---|---|
+| `surtr://system` | `get_system_info` |
+| `surtr://sensors/live` | `get_sensors` without filters |
+| `surtr://capabilities` | `get_capabilities` |
+
+The `diagnose_instability` prompt (optional argument `symptom`) starts a
+guided look at crashes, freezes, throttling or slowdowns: it asks the agent to
+check diagnostics, capabilities, sensors, throttle reasons and history, and to
+rank the likely causes with the readings behind each.
+
 ## Privacy and safety
 
 - No serial numbers, MAC addresses or host names are reported; paths under
@@ -59,9 +75,9 @@ Each sensor value also comes formatted with its unit (`"text": "56.0 °C"`).
   as data, never as instructions.
 - The server talks only over stdin and stdout of the process the client
   started; it opens no network port.
-- Every tool call is appended to `mcp-audit.jsonl` next to the history
-  database: time, client name and version, tool, arguments, outcome, answer
-  size and duration. It is rotated to `mcp-audit.1.jsonl` at 1 MiB.
+- Every tool call and resource read is appended to `mcp-audit.jsonl` next
+  to the history database: time, client name and version, tool, arguments,
+  outcome, answer size and duration. It is rotated to `mcp-audit.1.jsonl` at 1 MiB.
 - A client may make 30 calls at once and 5 per second after that; faster
   calls get an error result asking it to wait.
 
