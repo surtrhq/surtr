@@ -27,9 +27,15 @@ serde_json.workspace = true
 anstream = "1.0.0"
 anstyle = "1.0.14"
 clap_complete = "4.6.11"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+flate2 = "1.1.10"
 
 [lints]
 workspace = true
 
 [dev-dependencies]
 insta = "1.49.0"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }

@@ -4,8 +4,19 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// The surtr binary with logs going to a test directory, never the user's.
+fn surtr_command() -> Command {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_surtr"));
+    cmd.env("SURTR_LOG_DIR", test_log_dir());
+    cmd
+}
+
+fn test_log_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("surtr-cli-test-logs-{}", std::process::id()))
+}
+
 fn surtr(args: &[&str]) -> (bool, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_surtr"))
+    let output = surtr_command()
         .args(args)
         .output()
         .expect("failed to run surtr");
@@ -192,7 +203,7 @@ fn record_then_history() {
 
 /// Runs surtr and returns (exit code, stdout).
 fn surtr_code(args: &[&str]) -> (Option<i32>, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_surtr"))
+    let output = surtr_command()
         .args(args)
         .output()
         .expect("failed to run surtr");
@@ -245,11 +256,90 @@ fn completions_need_no_hardware() {
 // Piped output is not a terminal, so the TUI must refuse rather than hang.
 #[test]
 fn tui_refuses_without_a_terminal() {
-    let output = Command::new(env!("CARGO_BIN_EXE_surtr"))
+    let output = surtr_command()
         .args(["--mock", "tui"])
         .output()
         .expect("failed to run surtr");
     assert_eq!(output.status.code(), Some(1));
     let err = String::from_utf8_lossy(&output.stderr);
     assert!(err.contains("needs an interactive terminal"), "{err}");
+}
+
+#[test]
+fn commands_write_a_log_file() {
+    surtr(&["--mock", "info"]);
+    let logs: Vec<String> = std::fs::read_dir(test_log_dir())
+        .unwrap()
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.starts_with("surtr") && n.ends_with(".log"))
+        .collect();
+    assert!(!logs.is_empty(), "no log file");
+    let text = std::fs::read_to_string(test_log_dir().join(&logs[0])).unwrap();
+    assert!(text.contains("surtr started"), "{text}");
+}
+
+#[test]
+fn diag_summary_and_bundle() {
+    let (ok, summary) = surtr(&["--mock", "diag", "--summary"]);
+    assert!(ok);
+    assert!(
+        summary.starts_with("## Surtr diagnostic summary"),
+        "{summary}"
+    );
+    assert!(summary.contains("Mock 8-Core Processor (8 cores, 16 threads)"));
+    assert!(summary.contains("Mock GPU 16 GB (gpu0), driver 1.0"));
+    assert!(summary.contains("**Health: WARNING**"));
+    if let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
+        assert!(
+            !summary.contains(home.to_str().unwrap()),
+            "home directory leaked"
+        );
+    }
+
+    let dir = std::env::temp_dir().join(format!("surtr-cli-diag-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let zip_path = dir.join("bundle.zip");
+    let (ok, _) = surtr(&[
+        "--mock",
+        "diag",
+        "--yes",
+        "--out",
+        zip_path.to_str().unwrap(),
+    ]);
+    assert!(ok);
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
+    let names: Vec<String> = zip
+        .file_names()
+        .filter_map(|n| n.ok().map(|n| n.into_owned()))
+        .collect();
+    for expected in [
+        "manifest.json",
+        "summary.md",
+        "system.json",
+        "capabilities.json",
+        "sensors.json",
+    ] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "{expected} missing: {names:?}"
+        );
+    }
+    let mut md = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name("summary.md").unwrap(), &mut md).unwrap();
+    assert!(md.starts_with("## Surtr diagnostic summary"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Without a terminal to answer the prompt, diag must not write silently.
+#[test]
+fn diag_needs_yes_without_a_terminal() {
+    let output = surtr_command()
+        .args(["--mock", "diag"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--yes"));
 }

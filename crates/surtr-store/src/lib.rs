@@ -3,16 +3,13 @@
 //! Each sensor is stored once (keyed by provider and sensor id) and each value
 //! as a `(sensor, time, value)` row. Queries can downsample on the fly into
 //! fixed-size time buckets with average, minimum and maximum. Old samples are
-//! removed with [`Store::prune`]. Long-term rollups arrive when the daemon
+//! removed with [`Store::prune`]. The default file location comes from
+//! `surtr_core::paths::history_db`. Long-term rollups arrive when the daemon
 //! records continuously (plan, sections 4 and 5.5).
 
 #![forbid(unsafe_code)]
 
-use std::{
-    collections::HashMap,
-    env, fmt, fs,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, fmt, fs, path::Path};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -64,25 +61,6 @@ impl From<rusqlite::Error> for StoreError {
 
 /// Result type of this crate.
 pub type Result<T> = std::result::Result<T, StoreError>;
-
-/// The default database file: `surtr/history.db` in the per-user data
-/// directory (`%LOCALAPPDATA%` on Windows, `~/Library/Application Support`
-/// on macOS, `$XDG_DATA_HOME` or `~/.local/share` elsewhere).
-pub fn default_path() -> Option<PathBuf> {
-    let var = |name: &str| {
-        env::var_os(name)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    let base = if cfg!(windows) {
-        var("LOCALAPPDATA")?
-    } else if cfg!(target_os = "macos") {
-        var("HOME")?.join("Library/Application Support")
-    } else {
-        var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local/share")))?
-    };
-    Some(base.join("surtr").join("history.db"))
-}
 
 /// A sensor known to the database, with the span of its stored samples.
 #[derive(Debug, Clone, PartialEq)]
@@ -420,7 +398,7 @@ mod tests {
 
     #[test]
     fn file_database_reopens() {
-        let dir = env::temp_dir().join(format!("surtr-store-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("surtr-store-{}", std::process::id()));
         let path = dir.join("nested/history.db");
         let _ = fs::remove_dir_all(&dir);
         {
@@ -431,12 +409,5 @@ mod tests {
         assert_eq!(store.sensors().unwrap()[0].count, 1);
         drop(store);
         let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn default_path_ends_in_surtr() {
-        if let Some(path) = default_path() {
-            assert!(path.ends_with("surtr/history.db") || path.ends_with(r"surtr\history.db"));
-        }
     }
 }

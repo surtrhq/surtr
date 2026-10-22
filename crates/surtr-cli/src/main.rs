@@ -1,6 +1,9 @@
 //! The `surtr` command.
 
-use std::{cell::Cell, error::Error, path::PathBuf, process::ExitCode, thread, time::Duration};
+use std::{
+    cell::Cell, error::Error, io::IsTerminal, path::PathBuf, process::ExitCode, thread,
+    time::Duration,
+};
 
 use clap::{CommandFactory, Parser, Subcommand};
 use serde_json::json;
@@ -12,7 +15,9 @@ use surtr_core::Hub;
 use surtr_model::{Feature, SensorId, Timestamp};
 use surtr_store::Store;
 
+mod diag;
 mod history;
+mod logging;
 mod render;
 mod style;
 
@@ -26,6 +31,7 @@ Examples:
   surtr gpu throttle             why each GPU is below its potential clock
   surtr record --count 60        one minute of history
   surtr history cpu/load --since 10m --bucket 1m
+  surtr diag                     bug-report bundle (preview first, nothing uploaded)
   surtr --mock info              the built-in test machine
 
 Colors turn off when output is piped or NO_COLOR is set.";
@@ -71,6 +77,20 @@ enum Command {
         /// sensors such as CPU load need two samples.
         #[arg(long, default_value_t = 1000)]
         interval: u64,
+    },
+    /// Create a diagnostic bundle for a bug report: a Markdown summary plus
+    /// redacted system info, capabilities, sensors and recent logs, as a zip.
+    /// Shows what it contains and asks before writing; nothing is uploaded.
+    Diag {
+        /// Only print the Markdown summary (to paste into an issue).
+        #[arg(long)]
+        summary: bool,
+        /// Where to write the zip (default: surtr-diag-<time>.zip here).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Write without asking.
+        #[arg(long, short)]
+        yes: bool,
     },
     /// Interactive terminal UI: overview, sensors with trends, GPUs and
     /// capabilities. Works over SSH. Press ? inside for keys.
@@ -122,7 +142,7 @@ enum Command {
 
 fn db_path(db: Option<&PathBuf>) -> Result<PathBuf, String> {
     db.cloned()
-        .or_else(surtr_store::default_path)
+        .or_else(surtr_core::paths::history_db)
         .ok_or_else(|| "no per-user data directory found; pass --db".to_owned())
 }
 
@@ -187,6 +207,8 @@ fn main() -> ExitCode {
         clap_complete::generate(*shell, &mut Cli::command(), "surtr", &mut std::io::stdout());
         return ExitCode::SUCCESS;
     }
+    let _logging = logging::init();
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), command = ?cli.command, "surtr started");
     let code = Cell::new(0);
     let result = hub(cli.mock).and_then(|hub| run(&cli, &hub, &code).map_err(|e| e.to_string()));
     match result {
@@ -258,6 +280,48 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
             )
         }
         Command::Completions { .. } => unreachable!("handled before hardware access"),
+        Command::Diag {
+            summary,
+            out: path,
+            yes,
+        } => {
+            let bundle = diag::build(hub);
+            if *summary {
+                return out(json!({ "summary": bundle.summary }), bundle.summary.clone());
+            }
+            let path = path.clone().unwrap_or_else(|| {
+                PathBuf::from(format!("surtr-diag-{}.zip", diag::stamp(Timestamp::now())))
+            });
+            let shown = surtr_core::paths::redact(&path.display().to_string());
+            if !cli.json {
+                anstream::println!("{}", bundle.summary);
+                anstream::println!("The bundle will contain:");
+                for (name, bytes) in &bundle.files {
+                    anstream::println!("  {name:<40}{:>9} bytes", bytes.len());
+                }
+                anstream::println!();
+            }
+            if !yes {
+                if !std::io::stdin().is_terminal() {
+                    return Err("pass --yes to write the bundle without a prompt".into());
+                }
+                anstream::print!("Write {shown}? [y/N] ");
+                std::io::Write::flush(&mut anstream::stdout())?;
+                let mut answer = String::new();
+                std::io::stdin().read_line(&mut answer)?;
+                if !matches!(answer.trim(), "y" | "Y" | "yes") {
+                    return Ok("Nothing written.\n".to_owned());
+                }
+            }
+            diag::write(&bundle, &path)?;
+            let names: Vec<&str> = bundle.files.iter().map(|(n, _)| n.as_str()).collect();
+            out(
+                json!({ "path": shown, "files": names }),
+                format!(
+                    "Wrote {shown}. Attach it to your issue and paste summary.md into the description; nothing was uploaded.\n"
+                ),
+            )
+        }
         Command::Tui { interval } => {
             let interval = Duration::from_millis((*interval).max(100));
             surtr_tui::run(hub, interval, &process_name)?;

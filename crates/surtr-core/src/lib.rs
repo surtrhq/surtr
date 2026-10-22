@@ -5,7 +5,20 @@
 #![forbid(unsafe_code)]
 
 use serde::Serialize;
-use surtr_backend::Provider;
+use surtr_backend::{Provider, ProviderError};
+
+pub mod paths;
+
+/// The value of a provider call, or `None` after logging why it failed.
+fn logged<T>(p: &dyn Provider, what: &str, result: Result<T, ProviderError>) -> Option<T> {
+    match result {
+        Ok(v) => Some(v),
+        Err(err) => {
+            tracing::warn!(provider = p.id(), "{what} failed: {err}");
+            None
+        }
+    }
+}
 use surtr_model::{
     Capabilities, Feature, GpuProcess, SensorDescriptor, Support, SystemInfo, ThrottleState,
     Timestamp,
@@ -82,7 +95,11 @@ impl Hub {
     /// them, GPUs from all providers.
     pub fn system_info(&self) -> SystemInfo {
         let mut out = SystemInfo::default();
-        for info in self.providers.iter().filter_map(|p| p.system_info().ok()) {
+        for info in self
+            .providers
+            .iter()
+            .filter_map(|p| logged(p.as_ref(), "system info", p.system_info()))
+        {
             if out.os.name.is_none() && info.os.name.is_some() {
                 out.os = info.os;
             }
@@ -128,7 +145,7 @@ impl Hub {
     pub fn sensors(&self) -> Vec<SensorDescriptor> {
         self.providers
             .iter()
-            .filter_map(|p| p.sensors().ok())
+            .filter_map(|p| logged(p.as_ref(), "sensor list", p.sensors()))
             .flatten()
             .collect()
     }
@@ -138,10 +155,10 @@ impl Hub {
     pub fn read(&self) -> Vec<Sample> {
         let mut out = Vec::new();
         for p in &self.providers {
-            let Ok(descriptors) = p.sensors() else {
+            let Some(descriptors) = logged(p.as_ref(), "sensor list", p.sensors()) else {
                 continue;
             };
-            let readings = p.read_sensors().unwrap_or_default();
+            let readings = logged(p.as_ref(), "sensor read", p.read_sensors()).unwrap_or_default();
             out.extend(descriptors.into_iter().map(|descriptor| {
                 let reading = readings.iter().find(|r| r.id == descriptor.id);
                 Sample {
@@ -158,7 +175,7 @@ impl Hub {
     pub fn gpu_processes(&self) -> Vec<GpuProcess> {
         self.providers
             .iter()
-            .filter_map(|p| p.gpu_processes().ok())
+            .filter_map(|p| logged(p.as_ref(), "GPU processes", p.gpu_processes()))
             .flatten()
             .collect()
     }
@@ -167,7 +184,7 @@ impl Hub {
     pub fn throttle_reasons(&self) -> Vec<ThrottleState> {
         self.providers
             .iter()
-            .filter_map(|p| p.throttle_reasons().ok())
+            .filter_map(|p| logged(p.as_ref(), "throttle reasons", p.throttle_reasons()))
             .flatten()
             .collect()
     }
