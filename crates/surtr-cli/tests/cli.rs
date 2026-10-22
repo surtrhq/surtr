@@ -1350,3 +1350,69 @@ fn agent_skill_matches_the_cli() {
     assert!(checked >= 8, "only {checked} commands checked");
     let _ = std::fs::remove_dir_all(&data);
 }
+
+#[test]
+fn stress_cpu_passes_on_the_mock() {
+    let (code, out) = surtr_code(&[
+        "--mock",
+        "--json",
+        "stress",
+        "cpu",
+        "--duration",
+        "2s",
+        "--threads",
+        "2",
+    ]);
+    assert_eq!(code, Some(0), "{out}");
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["outcome"]["result"], "passed");
+    assert_eq!(v["threads"], 2);
+    assert!(
+        v["iterations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|n| n.as_u64() > Some(0))
+    );
+    assert!(v["failures"].as_array().unwrap().is_empty());
+    assert!(v["watched"][0]["stop_at"].as_f64().is_some());
+}
+
+#[test]
+fn stress_stops_at_the_temperature_limit() {
+    // The mock CPU runs at about 56 °C; a 40 °C limit stops the run at once.
+    let dir = std::env::temp_dir().join(format!("surtr-cli-stress-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("config.toml"), "[stress]\nmax_temp_c = 40\n").unwrap();
+    let out = surtr_command()
+        .env("SURTR_CONFIG_DIR", &dir)
+        .args([
+            "--mock",
+            "--json",
+            "stress",
+            "cpu",
+            "--duration",
+            "20s",
+            "--threads",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["outcome"]["result"], "temperature_limit");
+    assert_eq!(v["outcome"]["limit"], 40.0);
+    assert!(v["duration_ms"].as_u64().unwrap() < 10_000, "stopped early");
+
+    // The settings cap the duration too.
+    std::fs::write(dir.join("config.toml"), "[stress]\nmax_duration = \"1m\"\n").unwrap();
+    let out = surtr_command()
+        .env("SURTR_CONFIG_DIR", &dir)
+        .args(["--mock", "stress", "cpu", "--duration", "2m"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("longer than the 1m 00s limit"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

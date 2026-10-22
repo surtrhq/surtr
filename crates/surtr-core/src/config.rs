@@ -26,6 +26,13 @@ pub const TEMPLATE: &str = r#"# Surtr settings. Every setting is optional; comma
 [alerts]
 # Desktop notifications for alerts that surtr serve raises.
 # notify = true
+
+[stress]
+# Stop a stress test when a CPU temperature reaches this (°C). A CPU that
+# reports a lower critical limit stops 5 °C below that instead.
+# max_temp_c = 95
+# The longest a stress test may run; --duration can't exceed it.
+# max_duration = "30m"
 "#;
 
 /// General settings.
@@ -60,6 +67,15 @@ impl Alerts {
     }
 }
 
+/// Stress test limits.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stress {
+    /// Stop at this CPU temperature, in °C (default 95).
+    pub max_temp_c: Option<u32>,
+    /// Longest run, as a duration such as `30m` (default 30m).
+    pub max_duration: Option<String>,
+}
+
 /// All settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
@@ -72,6 +88,9 @@ pub struct Config {
     /// `[alerts]`.
     #[serde(default)]
     pub alerts: Alerts,
+    /// `[stress]`.
+    #[serde(default)]
+    pub stress: Stress,
 }
 
 /// Settings plus warnings about the file (unknown keys).
@@ -84,8 +103,10 @@ pub struct Loaded {
 }
 
 /// Keys Surtr knows, as `section.key`.
-const KNOWN: [&str; 5] = [
+const KNOWN: [&str; 7] = [
     "alerts.notify",
+    "stress.max_temp_c",
+    "stress.max_duration",
     "general.interval_ms",
     "general.theme",
     "history.retain",
@@ -146,6 +167,15 @@ impl Config {
             },
             alerts: Alerts {
                 notify: Some(self.alerts.notify()),
+            },
+            stress: Stress {
+                max_temp_c: Some(self.stress.max_temp_c.unwrap_or(95)),
+                max_duration: Some(
+                    self.stress
+                        .max_duration
+                        .clone()
+                        .unwrap_or_else(|| "30m".to_owned()),
+                ),
             },
         };
         toml::to_string_pretty(&shown).unwrap_or_default()

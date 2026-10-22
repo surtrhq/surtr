@@ -28,6 +28,7 @@ mod remote;
 mod render;
 mod serve;
 mod setup;
+mod stress;
 mod style;
 mod watch;
 
@@ -184,6 +185,25 @@ enum Command {
         /// per-user data directory).
         #[arg(long)]
         db: Option<PathBuf>,
+    },
+    /// Stress test the hardware and check every result. Stops at the
+    /// temperature limit, the time limit or Ctrl+C. Exit code: 0 passed,
+    /// 2 stopped early, 3 errors found.
+    Stress {
+        #[command(subcommand)]
+        test: StressCommand,
+    },
+    /// Internal: runs a stress workload for `surtr stress`.
+    #[command(hide = true)]
+    Worker {
+        /// The workload.
+        workload: String,
+        /// Worker threads.
+        #[arg(long)]
+        threads: u32,
+        /// How long to run, in milliseconds.
+        #[arg(long)]
+        duration_ms: u64,
     },
     /// Run in the background: poll sensors, record history and, with
     /// --metrics, serve Prometheus metrics. Stop with Ctrl+C.
@@ -344,6 +364,25 @@ fn config_command(
 }
 
 #[derive(Debug, Subcommand)]
+enum StressCommand {
+    /// Load every CPU thread with computations whose answers are known, and
+    /// report any wrong result.
+    Cpu {
+        /// How long to run (for example 30s, 5m; default 5m, at most
+        /// stress.max_duration, default 30m).
+        #[arg(long)]
+        duration: Option<String>,
+        /// Worker threads (default: one per logical CPU).
+        #[arg(long)]
+        threads: Option<u32>,
+        /// Run even without a CPU temperature sensor to watch, for at most
+        /// 60 seconds.
+        #[arg(long)]
+        unmonitored: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum McpCommand {
     /// Print the setup for an MCP client, with this surtr's full path.
     Config {
@@ -490,6 +529,15 @@ fn main() -> ExitCode {
             }
         };
     }
+    // A stress worker only computes; the host owns logs and hardware.
+    if let Some(Command::Worker {
+        workload,
+        threads,
+        duration_ms,
+    }) = &cli.command
+    {
+        return worker(workload, *threads, *duration_ms);
+    }
     let _logging = logging::init();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), command = ?cli.command, "surtr started");
     let code = Cell::new(0);
@@ -497,7 +545,7 @@ fn main() -> ExitCode {
     let embedded = cli.embedded
         || matches!(
             cli.command,
-            Some(Command::Serve { .. } | Command::Record { .. })
+            Some(Command::Serve { .. } | Command::Record { .. } | Command::Stress { .. })
         );
     let result = hub(cli.mock, embedded)
         .and_then(|hub| run(&cli, &Arc::new(hub), &code, &settings).map_err(|e| e.to_string()));
@@ -511,6 +559,23 @@ fn main() -> ExitCode {
             eprintln!("surtr: {err}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// `surtr worker`: runs a workload and streams its events on stdout.
+fn worker(workload: &str, threads: u32, duration_ms: u64) -> ExitCode {
+    if workload != "cpu" {
+        eprintln!("surtr: unknown workload {workload}");
+        return ExitCode::FAILURE;
+    }
+    let params = surtr_stress::cpu::Params {
+        threads,
+        duration: Duration::from_millis(duration_ms),
+    };
+    match surtr_stress::cpu::run(params, &mut std::io::stdout().lock()) {
+        Ok(()) => ExitCode::SUCCESS,
+        // The host went away (closed the pipe): nothing left to tell.
+        Err(_) => ExitCode::FAILURE,
     }
 }
 
@@ -644,6 +709,31 @@ fn run(
             surtr_tui::run(hub, interval, theme, &process_name)?;
             Ok(String::new())
         }
+        Command::Stress {
+            test:
+                StressCommand::Cpu {
+                    duration,
+                    threads,
+                    unmonitored,
+                },
+        } => {
+            let ms = |text: &str| history::parse_duration_ms(text).map(Duration::from_millis);
+            let max_duration = ms(settings.stress.max_duration.as_deref().unwrap_or("30m"))?;
+            let opts = stress::Options {
+                duration: ms(duration.as_deref().unwrap_or("5m"))?,
+                max_duration,
+                max_temp_c: f64::from(settings.stress.max_temp_c.unwrap_or(95)),
+                threads: threads.unwrap_or_else(|| {
+                    thread::available_parallelism()
+                        .map_or(1, |n| u32::try_from(n.get()).unwrap_or(1))
+                }),
+                unmonitored: *unmonitored,
+            };
+            let (report, exit) = stress::run(hub, &opts)?;
+            code.set(exit);
+            out(json!(report), stress::describe(&report))
+        }
+        Command::Worker { .. } => unreachable!("handled before the hub is built"),
         Command::Setup { dry_run } => Ok(setup::run(&hub.capabilities(), *dry_run)?),
         Command::Caps => {
             let capabilities = hub.capabilities();
