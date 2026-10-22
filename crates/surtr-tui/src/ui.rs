@@ -18,7 +18,6 @@ use crate::{
 };
 
 const BRAND: &str = " SURTR ";
-const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 /// The tab whose title covers terminal column `column` of the top row.
 pub fn tab_at(column: u16) -> Option<Tab> {
@@ -31,39 +30,6 @@ pub fn tab_at(column: u16) -> Option<Tab> {
         start += width;
     }
     None
-}
-
-/// The last `width` values as block characters, scaled to `range` or to the
-/// values' own span.
-pub fn spark(
-    values: impl IntoIterator<Item = f64>,
-    width: usize,
-    range: Option<(f64, f64)>,
-) -> String {
-    let values: Vec<f64> = values.into_iter().collect();
-    let values = &values[values.len().saturating_sub(width)..];
-    if values.is_empty() {
-        return String::new();
-    }
-    let (lo, hi) = range.unwrap_or_else(|| {
-        let lo = values.iter().copied().fold(f64::INFINITY, f64::min);
-        let hi = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        (lo, hi)
-    });
-    values
-        .iter()
-        .map(|v| {
-            if hi <= lo {
-                return BARS[0];
-            }
-            let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
-            BARS[((t * 7.0).round() as usize).min(7)]
-        })
-        .collect()
-}
-
-fn range_for(unit: Unit) -> Option<(f64, f64)> {
-    (unit == Unit::Percent).then_some((0.0, 100.0))
 }
 
 fn block<'a>(title: &'a str, p: &Palette) -> Block<'a> {
@@ -92,6 +58,53 @@ pub fn draw(f: &mut Frame, app: &App, p: &Palette) {
     if app.help {
         draw_help(f, f.area(), p);
     }
+    if app.palette.is_some() {
+        draw_palette(f, f.area(), app, p);
+    }
+}
+
+/// A box of `width` x `height` centered in `area`, clipped to it.
+fn centered(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + (area.height - height) / 3,
+        width,
+        height,
+    }
+}
+
+fn draw_palette(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
+    let Some(palette) = &app.palette else {
+        return;
+    };
+    let matches = app.palette_matches();
+    let popup = centered(area, 44, matches.len() as u16 + 4);
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(" > ", p.style(Role::Accent)),
+            Span::raw(palette.query.clone()),
+            Span::styled("▏", p.style(Role::Muted)),
+        ]),
+        Line::raw(""),
+    ];
+    if matches.is_empty() {
+        lines.push(Line::styled(
+            " No matching command.",
+            p.style(Role::Missing),
+        ));
+    }
+    for (i, (label, _)) in matches.iter().enumerate() {
+        let style = if i == palette.selected {
+            p.style(Role::Accent).add_modifier(Modifier::REVERSED)
+        } else {
+            Style::new()
+        };
+        lines.push(Line::styled(format!(" {label:<40}"), style));
+    }
+    f.render_widget(Clear, popup);
+    f.render_widget(Paragraph::new(lines).block(block("Commands", p)), popup);
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
@@ -134,7 +147,16 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
-    let keys = " q quit  ←/→ tabs  1-4 views  ↑/↓ scroll  ? help";
+    if app.filtering {
+        let prompt = Line::from(vec![
+            Span::styled(" filter /", p.style(Role::Accent)),
+            Span::raw(app.filter.clone()),
+            Span::styled("▏  Enter keep · Esc clear", p.style(Role::Muted)),
+        ]);
+        f.render_widget(prompt, area);
+        return;
+    }
+    let keys = " q quit  ←/→ tabs  1-4 views  ↑/↓ scroll  / filter  : commands  ? help";
     let providers = format!("{} ", app.providers.join(", "));
     let [left, right] = Layout::horizontal([
         Constraint::Min(0),
@@ -160,7 +182,7 @@ fn load_of<'a>(app: &'a App, device: Option<&str>) -> Option<&'a Sample> {
 fn trend_line<'a>(app: &App, sample: &Sample, width: usize, p: &Palette) -> Line<'a> {
     let bars = app
         .trend(sample)
-        .map(|t| spark(t.iter().copied(), width, Some((0.0, 100.0))))
+        .map(|t| format::spark(t.iter().copied(), width, Some((0.0, 100.0))))
         .unwrap_or_default();
     Line::from(vec![
         Span::raw(" ".repeat(11)),
@@ -259,8 +281,21 @@ fn draw_sensors(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
     }
     let trend_width = 24usize.min(HISTORY);
     let mut rows = Vec::new();
-    let sections = sensor_sections(&app.samples);
-    let mut samples = app.samples.iter();
+    let shown: Vec<Sample> = app
+        .samples
+        .iter()
+        .filter(|s| app.shown(s))
+        .cloned()
+        .collect();
+    if shown.is_empty() {
+        let text = Paragraph::new(format!(" No sensor matches \"{}\".", app.filter))
+            .style(p.style(Role::Missing))
+            .block(block("Sensors", p));
+        f.render_widget(text, area);
+        return;
+    }
+    let sections = sensor_sections(&shown);
+    let mut samples = shown.iter();
     for section in &sections {
         rows.push(Row::new(vec![Cell::from(Span::styled(
             section.title.clone(),
@@ -270,7 +305,13 @@ fn draw_sensors(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
             let sample = samples.next();
             let trend = sample
                 .and_then(|s| Some((s, app.trend(s)?)))
-                .map(|(s, t)| spark(t.iter().copied(), trend_width, range_for(s.descriptor.unit)))
+                .map(|(s, t)| {
+                    format::spark(
+                        t.iter().copied(),
+                        trend_width,
+                        format::spark_range(s.descriptor.unit),
+                    )
+                })
                 .unwrap_or_default();
             rows.push(Row::new(vec![
                 Cell::from(format!("  {}", row.label)),
@@ -287,7 +328,7 @@ fn draw_sensors(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
     let offset = app.scroll.min(rows.len().saturating_sub(visible));
     let total = rows.len();
     let rows: Vec<Row> = rows.into_iter().skip(offset).collect();
-    let title = if total > visible {
+    let mut title = if total > visible {
         format!(
             "Sensors {}-{} of {total}",
             offset + 1,
@@ -296,6 +337,9 @@ fn draw_sensors(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
     } else {
         "Sensors".to_owned()
     };
+    if !app.filter.is_empty() {
+        title.push_str(&format!(" · filter \"{}\"", app.filter));
+    }
     let table = Table::new(
         rows,
         [
@@ -537,6 +581,8 @@ fn draw_help(f: &mut Frame, area: Rect, p: &Palette) {
         ("PgUp/PgDn", "scroll by a page"),
         ("Home", "back to the top"),
         ("mouse", "click a tab, wheel to scroll"),
+        (": or Ctrl+P", "command palette"),
+        ("/", "filter sensors"),
         ("?", "this help"),
         ("q, Esc", "quit"),
     ];
@@ -573,14 +619,6 @@ fn draw_help(f: &mut Frame, area: Rect, p: &Palette) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sparkline_scales() {
-        assert_eq!(spark([0.0, 50.0, 100.0], 10, Some((0.0, 100.0))), "▁▅█");
-        assert_eq!(spark([5.0, 5.0], 10, None), "▁▁");
-        assert_eq!(spark((0..30).map(f64::from), 4, None), "▁▃▆█");
-        assert_eq!(spark([], 4, None), "");
-    }
 
     #[test]
     fn tab_hit_testing() {

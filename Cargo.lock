@@ -1685,6 +1685,7 @@ dependencies = [
  "anstyle",
  "clap",
  "clap_complete",
+ "crossterm",
  "flate2",
  "insta",
  "serde",

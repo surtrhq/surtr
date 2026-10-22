@@ -114,6 +114,49 @@ mod tests {
         assert!(!app.help && !app.quit);
     }
 
+    fn type_text(app: &mut App, text: &str) {
+        for c in text.chars() {
+            press(app, KeyCode::Char(c));
+        }
+    }
+
+    #[test]
+    fn palette_filters_and_runs_commands() {
+        let (_hub, mut app) = mock_app();
+        press(&mut app, KeyCode::Char(':'));
+        type_text(&mut app, "go to");
+        assert_eq!(app.palette_matches().len(), 4);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Down);
+        insta::assert_snapshot!("palette_80x24", render(&app, 80, 24));
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.tab, Tab::Gpu);
+        assert!(app.palette.is_none());
+        // Typing doesn't trigger shortcuts while the palette is open.
+        press(&mut app, KeyCode::Char(':'));
+        type_text(&mut app, "q");
+        assert!(!app.quit);
+        press(&mut app, KeyCode::Esc);
+        assert!(app.palette.is_none() && !app.quit);
+    }
+
+    #[test]
+    fn slash_filters_sensors() {
+        let (_hub, mut app) = mock_app();
+        press(&mut app, KeyCode::Char('/'));
+        assert_eq!(app.tab, Tab::Sensors);
+        type_text(&mut app, "temp");
+        insta::assert_snapshot!("sensors_filter_80x24", render(&app, 80, 24));
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.filtering);
+        assert_eq!(app.filter, "temp");
+        let shown = app.samples.iter().filter(|s| app.shown(s)).count();
+        assert_eq!(shown, 2);
+        press(&mut app, KeyCode::Char('/'));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.filter.is_empty());
+    }
+
     #[test]
     fn keys_switch_views_and_quit() {
         let (_hub, mut app) = mock_app();

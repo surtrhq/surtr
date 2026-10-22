@@ -102,6 +102,51 @@ pub fn support(support: Option<&Support>) -> (String, Role) {
     }
 }
 
+const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+/// The last `width` values as a block-character sparkline, scaled to `range`
+/// or to the values' own span.
+pub fn spark(
+    values: impl IntoIterator<Item = f64>,
+    width: usize,
+    range: Option<(f64, f64)>,
+) -> String {
+    let values: Vec<f64> = values.into_iter().collect();
+    let values = &values[values.len().saturating_sub(width)..];
+    if values.is_empty() {
+        return String::new();
+    }
+    let (lo, hi) = range.unwrap_or_else(|| {
+        let lo = values.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        // Span at least 5 % of the magnitude, so noise (a clock moving from
+        // 5500 to 5501 MHz) draws as a steady line instead of a jump.
+        let min_span = lo.abs().max(hi.abs()) * 0.05;
+        if hi - lo < min_span {
+            let mid = (hi + lo) / 2.0;
+            (mid - min_span / 2.0, mid + min_span / 2.0)
+        } else {
+            (lo, hi)
+        }
+    });
+    values
+        .iter()
+        .map(|v| {
+            if hi <= lo {
+                return BARS[0];
+            }
+            let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+            BARS[((t * 7.0).round() as usize).min(7)]
+        })
+        .collect()
+}
+
+/// The fixed range a sparkline of `unit` should use: 0-100 for percentages,
+/// otherwise the values' own span.
+pub fn spark_range(unit: Unit) -> Option<(f64, f64)> {
+    (unit == Unit::Percent).then_some((0.0, 100.0))
+}
+
 /// A remedy as one line: what to do, then the command or link.
 pub fn remedy(r: &Remedy) -> String {
     match (&r.command, &r.url) {
@@ -157,6 +202,26 @@ mod tests {
         assert_eq!(value(Unit::Celsius, 55.0), "55.0 °C");
         assert_eq!(value(Unit::Megahertz, 4405.4), "4405 MHz");
         assert_eq!(bytes(4 << 30), "4.0 GiB");
+    }
+
+    #[test]
+    fn sparkline_scales() {
+        assert_eq!(spark([0.0, 50.0, 100.0], 10, Some((0.0, 100.0))), "▁▅█");
+        assert_eq!(
+            spark([5.0, 5.0], 10, None),
+            "▅▅",
+            "steady values sit mid-height"
+        );
+        assert_eq!(
+            spark([5500.0, 5501.0], 10, None),
+            "▄▅",
+            "noise stays near the middle"
+        );
+        assert_eq!(spark([0.0, 0.0], 10, None), "▁▁");
+        assert_eq!(spark((0..30).map(f64::from), 4, None), "▁▃▆█");
+        assert_eq!(spark([], 4, None), "");
+        assert_eq!(spark_range(Unit::Percent), Some((0.0, 100.0)));
+        assert_eq!(spark_range(Unit::Celsius), None);
     }
 
     #[test]

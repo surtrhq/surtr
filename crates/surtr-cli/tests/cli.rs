@@ -343,3 +343,48 @@ fn diag_needs_yes_without_a_terminal() {
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("--yes"));
 }
+
+#[test]
+fn watch_streams_json_lines() {
+    let (code, out) = surtr_code(&[
+        "--mock",
+        "watch",
+        "temp",
+        "--json",
+        "--count",
+        "3",
+        "--interval",
+        "0",
+    ]);
+    assert_eq!(code, Some(0));
+    let lines: Vec<Value> = out
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("a JSON line"))
+        .collect();
+    assert_eq!(lines.len(), 3);
+    let ids: Vec<&str> = lines[0]["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["cpu0/package/temp", "gpu0/temp"]);
+}
+
+#[test]
+fn watch_text_frames_when_piped() {
+    let (code, out) = surtr_code(&["--mock", "watch", "--count", "2", "--interval", "0"]);
+    assert_eq!(code, Some(0));
+    assert_eq!(out.matches("surtr watch · every 0 ms").count(), 2);
+    assert!(!out.contains('\u{1b}'), "no escape codes when piped");
+    let (code, _) = surtr_code(&[
+        "--mock",
+        "watch",
+        "nothing-matches",
+        "--count",
+        "1",
+        "--interval",
+        "0",
+    ]);
+    assert_eq!(code, Some(1));
+}

@@ -45,6 +45,44 @@ impl Tab {
     }
 }
 
+/// Something the command palette can do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    /// Switch view.
+    Go(Tab),
+    /// Start typing a sensor filter.
+    FilterSensors,
+    /// Remove the sensor filter.
+    ClearFilter,
+    /// Show the keys.
+    Help,
+    /// Quit.
+    Quit,
+}
+
+impl Action {
+    /// Every palette entry, in display order.
+    pub const ALL: [(&'static str, Action); 8] = [
+        ("Go to Overview", Action::Go(Tab::Overview)),
+        ("Go to Sensors", Action::Go(Tab::Sensors)),
+        ("Go to GPU", Action::Go(Tab::Gpu)),
+        ("Go to Capabilities", Action::Go(Tab::Capabilities)),
+        ("Filter sensors…", Action::FilterSensors),
+        ("Clear sensor filter", Action::ClearFilter),
+        ("Show keys", Action::Help),
+        ("Quit", Action::Quit),
+    ];
+}
+
+/// The open command palette: what was typed and which match is selected.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandPalette {
+    /// Typed text; matches are entries containing it.
+    pub query: String,
+    /// Index into the current matches.
+    pub selected: usize,
+}
+
 /// Everything the TUI shows.
 #[derive(Debug)]
 pub struct App {
@@ -70,6 +108,12 @@ pub struct App {
     pub status: Status,
     /// Latest throttle reasons.
     pub throttle: Vec<ThrottleState>,
+    /// The command palette, while open.
+    pub palette: Option<CommandPalette>,
+    /// Sensor filter text (Sensors view).
+    pub filter: String,
+    /// Whether keys go to the sensor filter.
+    pub filtering: bool,
     /// Latest GPU processes.
     pub processes: Vec<GpuProcess>,
 }
@@ -102,6 +146,9 @@ impl App {
             status,
             throttle: Vec::new(),
             processes: Vec::new(),
+            palette: None,
+            filter: String::new(),
+            filtering: false,
         }
     }
 
@@ -162,7 +209,99 @@ impl App {
         }
     }
 
+    /// Palette entries matching the current query, in display order.
+    pub fn palette_matches(&self) -> Vec<(&'static str, Action)> {
+        let query = self
+            .palette
+            .as_ref()
+            .map(|p| p.query.to_lowercase())
+            .unwrap_or_default();
+        Action::ALL
+            .iter()
+            .filter(|(label, _)| label.to_lowercase().contains(&query))
+            .copied()
+            .collect()
+    }
+
+    fn run(&mut self, action: Action) {
+        match action {
+            Action::Go(tab) => self.select(tab),
+            Action::FilterSensors => {
+                self.select(Tab::Sensors);
+                self.filtering = true;
+            }
+            Action::ClearFilter => self.filter.clear(),
+            Action::Help => self.help = true,
+            Action::Quit => self.quit = true,
+        }
+    }
+
+    fn palette_key(&mut self, k: KeyEvent) {
+        let matches = self.palette_matches();
+        let Some(p) = self.palette.as_mut() else {
+            return;
+        };
+        match k.code {
+            KeyCode::Esc => self.palette = None,
+            KeyCode::Enter => {
+                let chosen = matches.get(p.selected).map(|&(_, a)| a);
+                self.palette = None;
+                if let Some(action) = chosen {
+                    self.run(action);
+                }
+            }
+            KeyCode::Down => p.selected = (p.selected + 1).min(matches.len().saturating_sub(1)),
+            KeyCode::Up => p.selected = p.selected.saturating_sub(1),
+            KeyCode::Backspace => {
+                p.query.pop();
+                p.selected = 0;
+            }
+            KeyCode::Char(c) => {
+                p.query.push(c);
+                p.selected = 0;
+            }
+            _ => {}
+        }
+    }
+
+    fn filter_key(&mut self, k: KeyEvent) {
+        match k.code {
+            KeyCode::Enter => self.filtering = false,
+            KeyCode::Esc => {
+                self.filtering = false;
+                self.filter.clear();
+            }
+            KeyCode::Backspace => {
+                self.filter.pop();
+            }
+            KeyCode::Char(c) => self.filter.push(c),
+            _ => {}
+        }
+        self.scroll = 0;
+    }
+
+    /// Whether `s` passes the sensor filter (case-insensitive substring of
+    /// its id, label or device).
+    pub fn shown(&self, s: &Sample) -> bool {
+        if self.filter.is_empty() {
+            return true;
+        }
+        let f = self.filter.to_lowercase();
+        let d = &s.descriptor;
+        [&d.id.0, &d.label, &d.device]
+            .iter()
+            .any(|t| t.to_lowercase().contains(&f))
+    }
+
     fn key(&mut self, k: KeyEvent) {
+        if self.palette.is_some() {
+            self.palette_key(k);
+            return;
+        }
+        if self.filtering {
+            self.filter_key(k);
+            return;
+        }
         if self.help {
             // Any key closes help; q still quits.
             self.help = false;
@@ -175,6 +314,11 @@ impl App {
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
             KeyCode::Esc => self.quit = true,
             KeyCode::Char('?') | KeyCode::F(1) => self.help = true,
+            KeyCode::Char(':') => self.palette = Some(CommandPalette::default()),
+            KeyCode::Char('p') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.palette = Some(CommandPalette::default());
+            }
+            KeyCode::Char('/') => self.run(Action::FilterSensors),
             KeyCode::Tab | KeyCode::Right => self.step_tab(true),
             KeyCode::BackTab | KeyCode::Left => self.step_tab(false),
             KeyCode::Char(c @ '1'..='4') => {

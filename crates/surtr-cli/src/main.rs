@@ -20,6 +20,7 @@ mod history;
 mod logging;
 mod render;
 mod style;
+mod watch;
 
 const EXAMPLES: &str = "\
 Examples:
@@ -27,6 +28,7 @@ Examples:
   surtr tui                      interactive terminal UI (works over SSH)
   surtr status                   health summary (exit code 0 ok, 2 warning, 3 critical)
   surtr sensors                  every sensor once
+  surtr watch temp gpu           live values with trends, filtered
   surtr sensors --json           the same as JSON, with each value's source
   surtr gpu throttle             why each GPU is below its potential clock
   surtr record --count 60        one minute of history
@@ -91,6 +93,20 @@ enum Command {
         /// Write without asking.
         #[arg(long, short)]
         yes: bool,
+    },
+    /// Live table of sensors with trends, redrawn in place (Ctrl+C to stop).
+    /// With --json, one JSON object per line for scripts.
+    Watch {
+        /// Only sensors whose id, label or device contains one of these
+        /// (for example `temp`, `gpu`, `cpu/load`). Default: all but
+        /// per-thread sensors.
+        filters: Vec<String>,
+        /// Milliseconds between updates.
+        #[arg(long, default_value_t = 1000)]
+        interval: u64,
+        /// Stop after this many updates.
+        #[arg(long)]
+        count: Option<u64>,
     },
     /// Interactive terminal UI: overview, sensors with trends, GPUs and
     /// capabilities. Works over SSH. Press ? inside for keys.
@@ -360,6 +376,20 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>) -> Result<String, Box<dyn Error>> 
                     "Wrote {shown}. Attach it to your issue and paste summary.md into the description; nothing was uploaded.\n"
                 ),
             )
+        }
+        Command::Watch {
+            filters,
+            interval,
+            count,
+        } => {
+            watch::run(
+                hub,
+                filters,
+                Duration::from_millis(*interval),
+                *count,
+                cli.json,
+            )?;
+            Ok(String::new())
         }
         Command::Tui { interval } => {
             let interval = Duration::from_millis((*interval).max(100));
