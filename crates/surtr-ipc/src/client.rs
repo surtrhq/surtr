@@ -53,6 +53,16 @@ fn open(endpoint: &Path) -> io::Result<(Box<dyn Read + Send>, Box<dyn Write + Se
             Err(e) => return Err(e),
         }
     };
+    // The pipe name is guessable: another user could have created it first.
+    if !crate::windows::server_is_ours(&file).unwrap_or(false) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "{} is served by another user's process; not using it",
+                endpoint.display()
+            ),
+        ));
+    }
     Ok((Box::new(file.try_clone()?), Box::new(file)))
 }
 

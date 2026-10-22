@@ -3,7 +3,7 @@
 
 #![allow(unsafe_code)]
 
-use std::{ffi::c_void, io, mem, ptr};
+use std::{ffi::c_void, io, mem, os::windows::io::AsRawHandle as _, ptr};
 
 use windows_sys::Win32::{
     Foundation::{CloseHandle, HANDLE, LocalFree},
@@ -15,7 +15,12 @@ use windows_sys::Win32::{
         GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
         TokenUser,
     },
-    System::Threading::{GetCurrentProcess, OpenProcessToken},
+    System::{
+        Pipes::GetNamedPipeServerProcessId,
+        Threading::{
+            GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        },
+    },
 };
 
 fn wide(s: &str) -> Vec<u16> {
@@ -24,9 +29,34 @@ fn wide(s: &str) -> Vec<u16> {
 
 /// The current user's SID, for example `S-1-5-21-...-1001`.
 pub fn user_sid() -> io::Result<String> {
+    // SAFETY: the pseudo-handle is always valid.
+    process_sid(unsafe { GetCurrentProcess() })
+}
+
+/// Whether the process serving the pipe `file` runs as the current user, so
+/// a pipe another user created under our name is never trusted.
+pub fn server_is_ours(file: &std::fs::File) -> io::Result<bool> {
+    let mut pid = 0u32;
+    // SAFETY: `file` is an open pipe handle; `pid` is an out-pointer.
+    if unsafe { GetNamedPipeServerProcessId(file.as_raw_handle(), &mut pid) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: plain call; the handle is checked and closed below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let sid = process_sid(process);
+    // SAFETY: `process` is open and closed once.
+    unsafe { CloseHandle(process) };
+    Ok(sid? == user_sid()?)
+}
+
+/// The SID of the user `process` runs as.
+fn process_sid(process: HANDLE) -> io::Result<String> {
     let mut token: HANDLE = ptr::null_mut();
-    // SAFETY: the pseudo-handle is always valid; `token` is an out-pointer.
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+    // SAFETY: `process` is a valid handle; `token` is an out-pointer.
+    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
         return Err(io::Error::last_os_error());
     }
     let result = (|| {

@@ -22,7 +22,14 @@ impl RemoteProvider {
     /// Connects to the local daemon, if one is running.
     pub fn connect() -> Option<Self> {
         let endpoint = surtr_ipc::endpoint().ok()?;
-        let client = Client::connect(&endpoint).ok()?;
+        let client = Client::connect(&endpoint)
+            .inspect_err(|e| {
+                // No daemon is the usual case; anything else is worth a note.
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!("not using surtr serve: {e}");
+                }
+            })
+            .ok()?;
         let id = format!("{} via surtr serve", client.hello().providers.join(", "));
         Some(Self {
             client: Mutex::new(client),
