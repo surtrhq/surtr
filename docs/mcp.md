@@ -42,7 +42,7 @@ clients sharing one server, `surtr serve` can serve MCP too:
 
 ```sh
 surtr serve --mcp 127.0.0.1:7878
-surtr mcp token            # the bearer token clients must send
+surtr token                # the bearer token clients must send
 ```
 
 Claude Code:
@@ -55,8 +55,9 @@ claude mcp add --transport http surtr http://127.0.0.1:7878/mcp \
 - Only loopback addresses are accepted. To reach it from another machine, use
   an SSH tunnel (`ssh -L 7878:127.0.0.1:7878 host`).
 - Every request needs `Authorization: Bearer <token>`. The token is created
-  on first use, stored in `mcp-token` next to the history database (readable
-  only by you), and replaced with `surtr mcp token --new`.
+  on first use, stored in `serve-token` next to the history database
+  (readable only by you), and replaced with `surtr token --new`. The REST API
+  ([api.md](api.md)) uses the same token.
 - Requests from web pages (any `Origin` header) and with a non-loopback
   `Host` are refused, so a website can't reach the server through your
   browser.

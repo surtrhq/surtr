@@ -43,6 +43,9 @@ pub struct Options {
     pub notify: bool,
     /// Where to serve MCP over HTTP, if anywhere (loopback only).
     pub mcp: Option<SocketAddr>,
+    /// Where to serve the REST and WebSocket API, if anywhere (loopback
+    /// only).
+    pub api: Option<SocketAddr>,
 }
 
 /// The latest read, which IPC clients get instead of reading the hardware
@@ -175,14 +178,16 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
         );
     }
 
-    if let Some(addr) = opts.mcp
-        && !addr.ip().is_loopback()
-    {
-        return Err(format!(
-            "MCP is served on loopback addresses only, such as 127.0.0.1:7878, not {addr}; \
-             use an SSH tunnel to reach it from another machine"
-        )
-        .into());
+    for (what, addr) in [("MCP", opts.mcp), ("the API", opts.api)] {
+        if let Some(addr) = addr
+            && !addr.ip().is_loopback()
+        {
+            return Err(format!(
+                "{what} is served on loopback addresses only, such as 127.0.0.1:7878, not \
+                 {addr}; use an SSH tunnel to reach it from another machine"
+            )
+            .into());
+        }
     }
 
     // One serve per database: a second one would double-poll the hardware.
@@ -210,7 +215,8 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
     }));
     let metrics = Arc::new(Mutex::new(String::new()));
 
-    // IPC, metrics and MCP share one small runtime on its own thread.
+    // IPC, metrics, MCP and the API share one small runtime on its own
+    // thread.
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -247,27 +253,50 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         providers: hub.provider_ids().into_iter().map(str::to_owned).collect(),
     };
+    // MCP and the API answer from the snapshot, never polling the hardware
+    // themselves, and share one bearer token.
+    let snapshot_hub = Arc::new({
+        let mut h = Hub::new();
+        h.add(Box::new(SnapshotProvider {
+            snapshot: Arc::clone(&snapshot),
+            system: system.clone(),
+            capabilities: capabilities.clone(),
+            id: hub.provider_ids().join(", "),
+        }));
+        h
+    });
+    let token = if opts.mcp.is_some() || opts.api.is_some() {
+        surtr_api::token::load_or_create(&surtr_api::token::path(&opts.db))?
+    } else {
+        String::new()
+    };
     let mcp = match opts.mcp {
         Some(addr) => {
             let listener = runtime.block_on(tokio::net::TcpListener::bind(addr))?;
-            let mut snapshot_hub = Hub::new();
-            snapshot_hub.add(Box::new(SnapshotProvider {
-                snapshot: Arc::clone(&snapshot),
-                system: system.clone(),
-                capabilities: capabilities.clone(),
-                id: hub.provider_ids().join(", "),
-            }));
             let server = surtr_mcp::Server::new(
-                Arc::new(snapshot_hub),
+                Arc::clone(&snapshot_hub),
                 opts.db.clone(),
                 Arc::new(|hub| crate::diag::build(hub).summary),
             );
-            let token = surtr_mcp::token::load_or_create(&surtr_mcp::token::path(&opts.db))?;
             eprintln!(
-                "Serving MCP on http://{}/mcp (bearer token: surtr mcp token)",
+                "Serving MCP on http://{}/mcp (bearer token: surtr token)",
                 listener.local_addr()?
             );
-            Some((listener, surtr_mcp::http::router(server, token)))
+            Some((listener, surtr_mcp::http::router(server, token.clone())))
+        }
+        None => None,
+    };
+    // Bumped after every read; live API sockets push then.
+    let (tick, reads) = watch::channel(0u64);
+    let api = match opts.api {
+        Some(addr) => {
+            let listener = runtime.block_on(tokio::net::TcpListener::bind(addr))?;
+            eprintln!(
+                "Serving the API on http://{}/api/v1 (bearer token: surtr token)",
+                listener.local_addr()?
+            );
+            let router = surtr_api::router(snapshot_hub, opts.db.clone(), reads, token);
+            Some((listener, router))
         }
         None => None,
     };
@@ -306,7 +335,16 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
                     }
                 }
             };
-            tokio::join!(ipc, http, mcp);
+            let api = async {
+                if let Some((listener, router)) = api
+                    && let Err(e) = axum::serve(listener, router)
+                        .with_graceful_shutdown(stopped(stop_rx.clone()))
+                        .await
+                {
+                    eprintln!("surtr: warning: API server stopped: {e}");
+                }
+            };
+            tokio::join!(ipc, http, mcp, api);
         });
     });
 
@@ -361,6 +399,7 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
             throttle,
             processes,
         };
+        tick.send_modify(|n| *n += 1);
         reads += 1;
         // Prune now and then, not on every read.
         if opts.retain_ms > 0 && reads % 600 == 1 {
@@ -369,6 +408,8 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
     }
 
     let _ = stop.send(true);
+    // Live sockets end when the reads stop.
+    drop(tick);
     let _ = server.join();
     drop(lock);
     Ok(format!("Stored {stored} values from {reads} reads.\n"))

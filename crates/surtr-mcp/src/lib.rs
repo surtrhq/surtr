@@ -21,17 +21,12 @@ use rmcp::{
     service::RequestContext,
     tool, tool_handler, tool_router,
 };
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use surtr_core::{Hub, Sample, paths};
-use surtr_model::{SensorId, SensorKind, Timestamp, Unit};
-use surtr_store::Store;
-use surtr_view::format;
+use serde_json::Value;
+use surtr_api::answers::{self, HistoryQuery, SensorFilter, data};
+use surtr_core::Hub;
 
 mod audit;
 pub mod http;
-pub mod token;
 use audit::{Audit, Entry};
 
 /// Instructions every client receives with the server's identity.
@@ -72,11 +67,6 @@ const DIAGNOSE: &str = "My computer is unstable: {symptom}\n\n\
     I should check next. Do not suggest changing voltages, clocks or power \
     limits without explaining the risk.";
 
-/// Longest history range `query_history` serves.
-const MAX_MINUTES: u64 = 7 * 24 * 60;
-/// Most buckets `query_history` returns.
-const MAX_BUCKETS: u64 = 1000;
-
 /// Produces the redacted `surtr diag` summary.
 pub type Diagnostics = Arc<dyn Fn(&Hub) -> String + Send + Sync>;
 
@@ -93,77 +83,6 @@ pub struct Server {
 impl std::fmt::Debug for Server {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Server").field("db", &self.db).finish()
-    }
-}
-
-/// Filter for `get_sensors`.
-#[derive(Debug, Default, Deserialize, JsonSchema)]
-pub struct SensorFilter {
-    /// Only sensors of this device, for example `cpu0` or `gpu1`.
-    pub device: Option<String>,
-    /// Only sensors of this kind: `temperature`, `power`, `clock`, `load`,
-    /// `fan`, `voltage`, `memory` and so on (as reported in `kind`).
-    pub kind: Option<String>,
-}
-
-/// Parameters of `query_history`.
-#[derive(Debug, Default, Deserialize, JsonSchema)]
-pub struct HistoryQuery {
-    /// Sensor id as reported by `get_sensors`, for example
-    /// `cpu0/package/temp`. Leave it out to list the recorded sensors.
-    pub sensor: Option<String>,
-    /// Provider of the sensor; needed only when two providers recorded the
-    /// same id.
-    pub provider: Option<String>,
-    /// How far back to look, in minutes (default 60, at most 10080).
-    pub minutes: Option<u64>,
-    /// Bucket length in seconds (default: about 120 buckets over the range).
-    pub bucket_seconds: Option<u64>,
-}
-
-/// One sensor as `get_sensors` reports it.
-#[derive(Debug, Serialize)]
-struct Reading {
-    id: String,
-    provider: String,
-    device: String,
-    label: String,
-    kind: SensorKind,
-    unit: Unit,
-    value: Option<f64>,
-    /// The value with its unit, for example `52.0 °C`.
-    text: Option<String>,
-    at: Option<String>,
-}
-
-impl From<Sample> for Reading {
-    fn from(s: Sample) -> Self {
-        let d = s.descriptor;
-        Self {
-            text: s.value.map(|v| format::value(d.unit, v)),
-            at: s.at.map(format::iso_utc),
-            id: d.id.0,
-            provider: d.source.provider,
-            device: d.device,
-            label: d.label,
-            kind: d.kind,
-            unit: d.unit,
-            value: s.value,
-        }
-    }
-}
-
-/// JSON text for a tool result, with the home directory redacted.
-fn data(value: &impl Serialize) -> Result<String, String> {
-    serde_json::to_string(value)
-        .map(|text| paths::redact(&text))
-        .map_err(|e| e.to_string())
-}
-
-fn kind_name(kind: SensorKind) -> String {
-    match serde_json::to_value(kind) {
-        Ok(Value::String(s)) => s,
-        _ => String::new(),
     }
 }
 
@@ -201,13 +120,7 @@ impl Server {
                        hardware providers in use."
     )]
     async fn get_system_info(&self) -> Result<String, String> {
-        let (system, providers) = self
-            .blocking(|hub| {
-                let ids: Vec<String> = hub.provider_ids().into_iter().map(str::to_owned).collect();
-                (hub.system_info(), ids)
-            })
-            .await?;
-        data(&json!({ "system": system, "providers": providers }))
+        data(&self.blocking(answers::system).await?)
     }
 
     #[tool(
@@ -219,21 +132,7 @@ impl Server {
         Parameters(filter): Parameters<SensorFilter>,
     ) -> Result<String, String> {
         let samples = self.blocking(Hub::read).await?;
-        let readings: Vec<Reading> = samples
-            .into_iter()
-            .filter(|s| {
-                filter
-                    .device
-                    .as_ref()
-                    .is_none_or(|d| s.descriptor.device == *d)
-                    && filter
-                        .kind
-                        .as_ref()
-                        .is_none_or(|k| kind_name(s.descriptor.kind) == *k)
-            })
-            .map(Reading::from)
-            .collect();
-        data(&readings)
+        data(&answers::sensors(samples, &filter))
     }
 
     #[tool(
@@ -267,7 +166,11 @@ impl Server {
         Parameters(query): Parameters<HistoryQuery>,
     ) -> Result<String, String> {
         let db = self.db.clone();
-        self.blocking(move |_| history(&db, &query)).await?
+        data(
+            &self
+                .blocking(move |_| answers::history(&db, &query))
+                .await??,
+        )
     }
 
     #[tool(
@@ -304,83 +207,6 @@ fn text_bytes(result: &CallToolResult) -> usize {
             _ => 0,
         })
         .sum()
-}
-
-/// The `query_history` answer.
-fn history(db: &std::path::Path, q: &HistoryQuery) -> Result<String, String> {
-    if !db.exists() {
-        return Err("no history recorded yet; run `surtr serve` or `surtr record`".to_owned());
-    }
-    let store = Store::open(db).map_err(|e| e.to_string())?;
-    let stored = store.sensors().map_err(|e| e.to_string())?;
-    let Some(sensor) = &q.sensor else {
-        let list: Vec<Value> = stored
-            .iter()
-            .map(|s| {
-                json!({
-                    "id": s.descriptor.id.0,
-                    "provider": s.descriptor.source.provider,
-                    "device": s.descriptor.device,
-                    "label": s.descriptor.label,
-                    "unit": s.descriptor.unit,
-                    "samples": s.count,
-                    "first": s.first.map(format::iso_utc),
-                    "last": s.last.map(format::iso_utc),
-                })
-            })
-            .collect();
-        return data(&list);
-    };
-    let matches: Vec<_> = stored
-        .iter()
-        .filter(|s| s.descriptor.id.0 == *sensor)
-        .filter(|s| {
-            q.provider
-                .as_ref()
-                .is_none_or(|p| s.descriptor.source.provider == *p)
-        })
-        .collect();
-    let found = match matches.as_slice() {
-        [one] => *one,
-        [] => return Err(format!("no history for sensor {sensor:?}")),
-        _ => {
-            return Err(format!(
-                "{sensor:?} was recorded by several providers; pass `provider`"
-            ));
-        }
-    };
-    let minutes = q.minutes.unwrap_or(60).clamp(1, MAX_MINUTES);
-    let range_ms = minutes * 60_000;
-    let bucket_ms = q
-        .bucket_seconds
-        .map_or(range_ms / 120, |s| s.saturating_mul(1000))
-        .max(range_ms / MAX_BUCKETS)
-        .max(1000);
-    let to = Timestamp::now();
-    let from = Timestamp(to.0.saturating_sub(range_ms));
-    let buckets = store
-        .history(
-            &found.descriptor.source.provider,
-            &SensorId(sensor.clone()),
-            from,
-            Timestamp(to.0 + 1),
-            bucket_ms,
-        )
-        .map_err(|e| e.to_string())?;
-    let points: Vec<Value> = buckets
-        .iter()
-        .map(|b| json!({ "at": format::iso_utc(b.at), "avg": b.avg, "min": b.min, "max": b.max, "count": b.count }))
-        .collect();
-    data(&json!({
-        "sensor": sensor,
-        "provider": found.descriptor.source.provider,
-        "label": found.descriptor.label,
-        "unit": found.descriptor.unit,
-        "from": format::iso_utc(from),
-        "to": format::iso_utc(to),
-        "bucket_seconds": bucket_ms / 1000,
-        "buckets": points,
-    }))
 }
 
 #[tool_handler(router = self.tool_router)]

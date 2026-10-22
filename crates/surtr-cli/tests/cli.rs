@@ -1031,7 +1031,7 @@ fn serve_answers_mcp_over_http_with_a_token() {
         line.clear();
     }
     let addr = addr.expect("serve printed its MCP address");
-    let (ok, token) = surtr(&["mcp", "--db", db, "token"]);
+    let (ok, token) = surtr(&["token", "--db", db]);
     assert!(ok);
     let token = token.trim();
     assert_eq!(token.len(), 64);
@@ -1112,5 +1112,162 @@ fn serve_answers_mcp_over_http_with_a_token() {
     assert!(child.wait().unwrap().success());
     let audit = std::fs::read_to_string(dir.join("mcp-audit.jsonl")).unwrap();
     assert!(audit.contains("surtr-http-test 0"), "{audit}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A GET with optional extra headers; returns the raw response.
+fn http_get_with(addr: &str, path: &str, headers: &[(&str, &str)]) -> String {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap();
+    let mut request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+    response
+}
+
+/// Opens a WebSocket at `path` and returns the first text message.
+fn websocket_first_text(addr: &str, path: &str, bearer: &str) -> String {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: {bearer}\r\n\
+         Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+    )
+    .unwrap();
+    let mut reader = BufReader::new(stream);
+    let mut status = String::new();
+    reader.read_line(&mut status).unwrap();
+    assert!(status.contains(" 101 "), "{status}");
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        if line == "\r\n" {
+            break;
+        }
+    }
+    // One unmasked server frame: FIN+text, then a 7-, 16- or 64-bit length.
+    let mut head = [0u8; 2];
+    reader.read_exact(&mut head).unwrap();
+    assert_eq!(head[0], 0x81, "a final text frame");
+    let len = match head[1] & 0x7f {
+        126 => {
+            let mut n = [0u8; 2];
+            reader.read_exact(&mut n).unwrap();
+            u64::from(u16::from_be_bytes(n))
+        }
+        127 => {
+            let mut n = [0u8; 8];
+            reader.read_exact(&mut n).unwrap();
+            u64::from_be_bytes(n)
+        }
+        n => u64::from(n),
+    };
+    let mut payload = vec![0u8; usize::try_from(len).unwrap()];
+    reader.read_exact(&mut payload).unwrap();
+    String::from_utf8(payload).unwrap()
+}
+
+#[test]
+fn serve_answers_the_rest_api() {
+    use std::io::{BufRead, BufReader};
+    let dir = std::env::temp_dir().join(format!("surtr-cli-api-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("history.db");
+    let db = db.to_str().unwrap();
+
+    let (code, _) = surtr_code(&[
+        "--mock",
+        "serve",
+        "--api",
+        "0.0.0.0:0",
+        "--count",
+        "1",
+        "--db",
+        db,
+    ]);
+    assert_eq!(code, Some(1), "only loopback addresses");
+
+    let mut child = surtr_command()
+        .args(["--mock", "serve", "--api", "127.0.0.1:0", "--count", "40"])
+        .args(["--interval", "100", "--retain", "0", "--db", db])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut addr = None;
+    let mut line = String::new();
+    while stderr.read_line(&mut line).unwrap() > 0 {
+        if let Some(rest) = line.trim().strip_prefix("Serving the API on http://") {
+            addr = rest.split_once("/api").map(|(a, _)| a.to_owned());
+            break;
+        }
+        line.clear();
+    }
+    let addr = addr.expect("serve printed its API address");
+    let (ok, token) = surtr(&["token", "--db", db]);
+    assert!(ok);
+    let bearer = format!("Bearer {}", token.trim());
+    let auth = [("Authorization", bearer.as_str())];
+    let status = |r: &str| r.split(' ').nth(1).unwrap_or_default().to_owned();
+    let body = |r: &str| -> Value {
+        serde_json::from_str(r.split_once("\r\n\r\n").map_or("", |(_, b)| b)).unwrap()
+    };
+
+    assert_eq!(status(&http_get_with(&addr, "/api/v1/system", &[])), "401");
+    let page = http_get_with(
+        &addr,
+        "/api/v1/system",
+        &[
+            ("Authorization", &bearer),
+            ("Origin", "https://evil.example"),
+        ],
+    );
+    assert_eq!(status(&page), "403");
+
+    let r = http_get_with(&addr, "/api/v1/system", &auth);
+    assert_eq!(status(&r), "200", "{r}");
+    assert_eq!(body(&r)["providers"][0], "mock");
+
+    let r = http_get_with(&addr, "/api/v1/sensors?kind=temperature&device=cpu0", &auth);
+    let sensors = body(&r);
+    let sensors = sensors.as_array().unwrap();
+    assert!(!sensors.is_empty());
+    assert!(sensors.iter().all(|s| s["kind"] == "temperature"));
+
+    for path in [
+        "/api/v1/capabilities",
+        "/api/v1/gpu/processes",
+        "/api/v1/gpu/throttle",
+    ] {
+        assert_eq!(status(&http_get_with(&addr, path, &auth)), "200", "{path}");
+    }
+    let r = http_get_with(&addr, "/api/v1/history?sensor=no/such", &auth);
+    assert_eq!(status(&r), "404");
+    assert!(body(&r)["error"].is_string());
+
+    let live = websocket_first_text(&addr, "/api/v1/live?device=gpu0", &bearer);
+    let live: Value = serde_json::from_str(&live).unwrap();
+    assert!(
+        live.as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["device"] == "gpu0")
+    );
+
+    assert!(child.wait().unwrap().success());
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -4,19 +4,14 @@
 
 use std::sync::Arc;
 
-use axum::{
-    Router,
-    extract::Request,
-    http::{StatusCode, header},
-    middleware::{self, Next},
-    response::{IntoResponse, Response},
-};
+use axum::{Router, middleware};
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
+use surtr_api::guard;
 use tokio_util::sync::CancellationToken;
 
-use crate::{Server, token};
+use crate::Server;
 
 /// Largest request body accepted.
 const MAX_BODY: usize = 64 * 1024;
@@ -33,13 +28,14 @@ impl Stop {
     }
 }
 
-/// The `/mcp` endpoint, answering with `server` to requests that carry
-/// `Authorization: Bearer <expected>`.
+/// The `/mcp` endpoint, answering with `server` to requests that pass the
+/// same checks as the REST API: the bearer token `expected`, a loopback
+/// `Host`, and no browser `Origin`.
 pub fn router(server: Server, expected: String) -> (Router, Stop) {
     let stop = Stop::default();
+    // rmcp checks Host and Origin as well; the guard below makes the rules
+    // identical for MCP and the REST API.
     let config = StreamableHttpServerConfig::default()
-        // Host must be a loopback name (the default), against DNS rebinding;
-        // any browser Origin is refused, so web pages can't call us.
         .enforce_origin_validation()
         .with_max_request_body_bytes(MAX_BODY)
         .with_cancellation_token(stop.0.clone());
@@ -51,28 +47,8 @@ pub fn router(server: Server, expected: String) -> (Router, Stop) {
     let expected = Arc::new(expected);
     let router = Router::new()
         .nest_service("/mcp", service)
-        .layer(middleware::from_fn(move |request: Request, next: Next| {
-            let expected = Arc::clone(&expected);
-            async move { authorize(&expected, request, next).await }
+        .layer(middleware::from_fn(move |request, next| {
+            guard::check(Arc::clone(&expected), request, next)
         }));
     (router, stop)
-}
-
-async fn authorize(expected: &str, request: Request, next: Next) -> Response {
-    let given = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or_default();
-    if token::matches(expected, given) {
-        next.run(request).await
-    } else {
-        (
-            StatusCode::UNAUTHORIZED,
-            [(header::WWW_AUTHENTICATE, "Bearer")],
-            "missing or wrong bearer token; see `surtr mcp token`\n",
-        )
-            .into_response()
-    }
 }

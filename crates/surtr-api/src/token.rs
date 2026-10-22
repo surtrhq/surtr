@@ -1,5 +1,5 @@
-//! The bearer token for MCP over HTTP: 32 random bytes, hex-encoded, kept
-//! in a file only the user can read.
+//! The bearer token for `surtr serve`'s HTTP interfaces (MCP and the REST
+//! API): 32 random bytes, hex-encoded, kept in a file only the user can read.
 
 use std::{
     fs,
@@ -7,9 +7,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Where the token lives: `mcp-token` next to the history database.
+/// Where the token lives: `serve-token` next to the history database.
 pub fn path(db: &Path) -> PathBuf {
-    db.with_file_name("mcp-token")
+    db.with_file_name("serve-token")
 }
 
 /// The token in `file`, created on first use.
@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn creates_once_and_rotates() {
-        let dir = std::env::temp_dir().join(format!("surtr-mcp-token-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("surtr-api-token-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let file = path(&dir.join("history.db"));
         let first = load_or_create(&file).unwrap();

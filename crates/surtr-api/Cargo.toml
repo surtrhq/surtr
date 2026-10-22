@@ -1,0 +1,27 @@
+[package]
+name = "surtr-api"
+description = "Local REST and WebSocket API for Surtr, and the JSON answers it shares with the MCP server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+surtr-model.workspace = true
+surtr-core.workspace = true
+surtr-store.workspace = true
+surtr-view.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query", "ws"] }
+getrandom = "0.4"
+schemars = "1"
+tokio = { version = "1", default-features = false, features = ["rt", "sync"] }
+
+[dev-dependencies]
+surtr-backend = { workspace = true, features = ["mock"] }
+tokio = { version = "1", default-features = false, features = ["rt", "macros"] }
+
+[lints]
+workspace = true
