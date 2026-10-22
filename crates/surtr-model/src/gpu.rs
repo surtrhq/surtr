@@ -55,6 +55,21 @@ pub enum ThrottleReason {
     DisplayClocks,
 }
 
+impl ThrottleReason {
+    /// Every reason, in display order.
+    pub const ALL: [ThrottleReason; 9] = [
+        Self::Idle,
+        Self::ApplicationClocks,
+        Self::PowerCap,
+        Self::HardwareSlowdown,
+        Self::SyncBoost,
+        Self::SoftwareThermal,
+        Self::HardwareThermal,
+        Self::HardwarePowerBrake,
+        Self::DisplayClocks,
+    ];
+}
+
 /// The throttle reasons active on one device right now. An empty list means
 /// the device runs unrestricted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

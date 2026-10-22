@@ -517,3 +517,108 @@ fn config_interval_applies() {
     assert!(out.contains("every 0 ms"), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A plain HTTP/1.1 GET; returns the response body.
+fn http_get(addr: &str, path: &str) -> std::io::Result<String> {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(addr)?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+    )?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?;
+    Ok(response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_owned())
+        .unwrap_or_default())
+}
+
+#[test]
+fn serve_records_and_exposes_metrics() {
+    use std::io::{BufRead, BufReader};
+    let dir = std::env::temp_dir().join(format!("surtr-cli-serve-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let db = dir.join("history.db");
+    let db = db.to_str().unwrap();
+
+    let mut child = surtr_command()
+        .args([
+            "--mock",
+            "serve",
+            "--metrics",
+            "127.0.0.1:0",
+            "--count",
+            "30",
+            "--interval",
+            "100",
+            "--retain",
+            "0",
+            "--db",
+            db,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut addr = None;
+    let mut line = String::new();
+    while stderr.read_line(&mut line).unwrap() > 0 {
+        if let Some(rest) = line.trim().strip_prefix("Serving metrics on http://") {
+            addr = rest.strip_suffix("/metrics").map(str::to_owned);
+            break;
+        }
+        line.clear();
+    }
+    let addr = addr.expect("serve printed its metrics address");
+
+    // The first read lands after one interval; retry until it shows up.
+    let mut body = String::new();
+    for _ in 0..30 {
+        body = http_get(&addr, "/metrics").unwrap_or_default();
+        if body.contains("surtr_temperature_celsius{") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(
+        body.contains("# TYPE surtr_temperature_celsius gauge"),
+        "{body}"
+    );
+    assert!(body.contains("surtr_gpu_throttle_active{device=\"gpu0\",reason=\"power_cap\"} 1"));
+
+    // A second serve on the same database is refused while the first runs.
+    let (ok, _) = surtr(&[
+        "--mock",
+        "serve",
+        "--count",
+        "1",
+        "--interval",
+        "0",
+        "--db",
+        db,
+    ]);
+    assert!(!ok, "a second serve must not start");
+
+    assert!(child.wait().unwrap().success());
+    let (ok, _) = surtr(&["history", "--db", db]);
+    assert!(ok);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn serve_refuses_remote_metrics_without_opt_in() {
+    let (code, _) = surtr_code(&[
+        "--mock",
+        "serve",
+        "--metrics",
+        "0.0.0.0:0",
+        "--count",
+        "1",
+        "--interval",
+        "0",
+    ]);
+    assert_eq!(code, Some(1));
+}

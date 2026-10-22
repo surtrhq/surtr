@@ -23,6 +23,7 @@ mod export;
 mod history;
 mod logging;
 mod render;
+mod serve;
 mod style;
 mod watch;
 
@@ -36,6 +37,7 @@ Examples:
   surtr sensors --json           the same as JSON, with each value's source
   surtr gpu throttle             why each GPU is below its potential clock
   surtr record --count 60        one minute of history
+  surtr serve --metrics 127.0.0.1:9469   record continuously, serve Prometheus metrics
   surtr history cpu/load --since 10m --bucket 1m
   surtr export --since 1h --bucket 10s > history.csv
   surtr diag                     bug-report bundle (preview first, nothing uploaded)
@@ -131,6 +133,30 @@ enum Command {
     Gpu {
         #[command(subcommand)]
         command: GpuCommand,
+    },
+    /// Run in the background: poll sensors, record history and, with
+    /// --metrics, serve Prometheus metrics. Stop with Ctrl+C.
+    Serve {
+        /// Milliseconds between reads (default: settings, else 1000).
+        #[arg(long)]
+        interval: Option<u64>,
+        /// Stop after this many reads.
+        #[arg(long)]
+        count: Option<u64>,
+        /// Delete history older than this (default: settings, else 7d).
+        #[arg(long)]
+        retain: Option<String>,
+        /// Database file (default: settings, else the per-user data directory).
+        #[arg(long)]
+        db: Option<PathBuf>,
+        /// Serve Prometheus metrics at this address, for example
+        /// 127.0.0.1:9469 (port 0 picks a free one).
+        #[arg(long)]
+        metrics: Option<std::net::SocketAddr>,
+        /// Allow a --metrics address reachable from other machines. There
+        /// is no authentication.
+        #[arg(long)]
+        metrics_remote: bool,
     },
     /// Record every sensor into the history database until stopped (Ctrl+C)
     /// or until --count samples are stored.
@@ -565,6 +591,32 @@ fn run(cli: &Cli, hub: &Hub, code: &Cell<u8>, settings: &Config) -> Result<Strin
             out(
                 json!({ "providers": providers, "throttle": throttle }),
                 render::throttle(&throttle),
+            )
+        }
+        Command::Serve {
+            interval,
+            count,
+            retain,
+            db,
+            metrics,
+            metrics_remote,
+        } => {
+            let retain_ms = history::parse_duration_ms(
+                retain
+                    .as_deref()
+                    .or(settings.history.retain.as_deref())
+                    .unwrap_or("7d"),
+            )?;
+            serve::run(
+                hub,
+                &serve::Options {
+                    interval: Duration::from_millis(ms(interval)),
+                    count: *count,
+                    retain_ms,
+                    db: db_path(db.as_ref(), settings)?,
+                    metrics: *metrics,
+                    metrics_remote: *metrics_remote,
+                },
             )
         }
         Command::Record {
