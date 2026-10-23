@@ -147,6 +147,19 @@ pub fn report(record: &Record) -> String {
             format!("{} of {} planned", span(length), span(record.planned_ms)),
         ),
         ("Threads", record.threads.to_string()),
+        (
+            "CPUs",
+            if record.cpus.is_empty() {
+                "-".to_owned()
+            } else {
+                record
+                    .cpus
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
+        ),
         ("Machine", record.machine.join(" · ")),
         ("Surtr", record.surtr.clone()),
     ];
@@ -267,6 +280,7 @@ mod tests {
             ended: Some("2026-10-22T23:46:01Z".into()),
             planned_ms: 60_000,
             threads: 8,
+            cpus: Vec::new(),
             surtr: "0.1.0".into(),
             machine: vec!["CPU <script>".into()],
             watched: vec![Watched {

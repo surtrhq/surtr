@@ -1713,3 +1713,37 @@ allow_stress = true
     assert_eq!(runs["runs"][0]["state"], "done");
     let _ = std::fs::remove_dir_all(&data);
 }
+
+#[test]
+fn stress_threads_go_where_asked() {
+    let data = data_dir("placement");
+    let run = |args: &[&str]| {
+        surtr_command()
+            .env("SURTR_DATA_DIR", &data)
+            .args(["--mock", "--json", "stress", "cpu", "--duration", "1s"])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    // Hand-picked CPUs, recorded in the run.
+    assert_eq!(run(&["--cpus", "0"]).status.code(), Some(0));
+    let runs = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args(["--json", "runs", "show", "latest"])
+        .output()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&runs.stdout).unwrap();
+    assert_eq!(v["cpus"], serde_json::json!([0]));
+    assert_eq!(v["threads"], 1);
+
+    // More threads than CPUs, a CPU that isn't there, and conflicting flags
+    // are refused before anything runs.
+    for args in [
+        &["--threads", "100000"][..],
+        &["--cpus", "100000"],
+        &["--cpus", "0", "--threads", "1"],
+    ] {
+        assert_ne!(run(args).status.code(), Some(0), "{args:?}");
+    }
+    let _ = std::fs::remove_dir_all(&data);
+}

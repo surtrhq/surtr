@@ -187,12 +187,22 @@ pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
         .map(|(_, k)| SEEDS.iter().map(|&s| k(s)).collect())
         .collect();
     let expected = Arc::new(expected);
-    let threads = params.threads.max(1);
+    let threads = if params.cpus.is_empty() {
+        params.threads.max(1)
+    } else {
+        u32::try_from(params.cpus.len()).unwrap_or(u32::MAX)
+    };
     let counts: Arc<Vec<AtomicU64>> = Arc::new((0..threads).map(|_| AtomicU64::new(0)).collect());
     let stop = Arc::new(AtomicBool::new(false));
     let start = Instant::now();
     let (errors, inbox) = mpsc::channel::<Event>();
-    let allowed = Arc::new(allowed_cpus());
+    // The host's placement, else thread t on the t-th CPU this process may
+    // use.
+    let allowed = Arc::new(if params.cpus.is_empty() {
+        allowed_cpus()
+    } else {
+        params.cpus.clone()
+    });
 
     writeln!(
         out,
@@ -216,7 +226,6 @@ pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
                 Arc::clone(&allowed),
             );
             thread::spawn(move || {
-                // Thread t on the t-th CPU this process may use.
                 let cpu = (!allowed.is_empty())
                     .then(|| allowed[t as usize % allowed.len()])
                     .filter(|&c| pin(c));
@@ -317,6 +326,7 @@ mod tests {
         run(
             Params {
                 threads: 2,
+                cpus: Vec::new(),
                 duration: Duration::from_millis(1300),
             },
             &mut out,

@@ -207,6 +207,9 @@ enum Command {
         /// Worker threads.
         #[arg(long)]
         threads: u32,
+        /// The logical CPU of each thread.
+        #[arg(long, value_delimiter = ',')]
+        cpus: Vec<u32>,
         /// How long to run, in milliseconds.
         #[arg(long)]
         duration_ms: u64,
@@ -406,9 +409,16 @@ enum StressCommand {
         /// stress.max_duration, default 30m).
         #[arg(long)]
         duration: Option<String>,
-        /// Worker threads (default: one per logical CPU).
-        #[arg(long)]
+        /// Worker threads (default: one per logical CPU). They go one per
+        /// physical core before any SMT sibling is used.
+        #[arg(long, conflicts_with = "cpus")]
         threads: Option<u32>,
+        /// Exactly these logical CPUs, one thread each, for example 0,2,5.
+        #[arg(long, value_delimiter = ',')]
+        cpus: Option<Vec<u32>>,
+        /// At most one thread per physical core (no SMT siblings).
+        #[arg(long, conflicts_with = "cpus")]
+        no_smt: bool,
         /// Run even without a CPU temperature sensor to watch, for at most
         /// 60 seconds.
         #[arg(long)]
@@ -570,10 +580,11 @@ fn main() -> ExitCode {
     if let Some(Command::Worker {
         workload,
         threads,
+        cpus,
         duration_ms,
     }) = &cli.command
     {
-        return worker(workload, *threads, *duration_ms);
+        return worker(workload, *threads, cpus, *duration_ms);
     }
     // Past runs need no hardware access (confirming one starts a run).
     if let Some(Command::Runs { command }) = &cli.command
@@ -642,13 +653,14 @@ pub(crate) fn mcp_server(hub: Arc<Hub>, db: PathBuf, stress_ms: Option<u64>) -> 
 }
 
 /// `surtr worker`: runs a workload and streams its events on stdout.
-fn worker(workload: &str, threads: u32, duration_ms: u64) -> ExitCode {
+fn worker(workload: &str, threads: u32, cpus: &[u32], duration_ms: u64) -> ExitCode {
     let Some(workload) = surtr_stress::workload(workload) else {
         eprintln!("surtr: unknown workload {workload}");
         return ExitCode::FAILURE;
     };
     let params = surtr_stress::Params {
         threads,
+        cpus: cpus.to_vec(),
         duration: Duration::from_millis(duration_ms),
     };
     match workload.run(params, &mut std::io::stdout().lock()) {
@@ -793,6 +805,8 @@ fn run(
                 StressCommand::Cpu {
                     duration,
                     threads,
+                    cpus,
+                    no_smt,
                     unmonitored,
                     plain,
                 },
@@ -803,7 +817,9 @@ fn run(
                 duration: ms(duration.as_deref().unwrap_or("5m"))?,
                 max_duration,
                 max_temp_c: f64::from(settings.stress.max_temp_c.unwrap_or(95)),
-                threads: threads.unwrap_or_else(stress::all_threads),
+                threads: *threads,
+                cpus: cpus.clone(),
+                smt: !no_smt,
                 unmonitored: *unmonitored,
                 requested_by: None,
                 animate: !cli.json && stress::animate(*plain),

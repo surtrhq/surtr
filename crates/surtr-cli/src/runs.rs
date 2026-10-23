@@ -156,7 +156,9 @@ pub fn confirm(hub: &Hub, id: &str, settings: &Config) -> Result<(Report, u8), S
         duration: Duration::from_millis(req.duration_ms),
         max_duration: ms(settings.stress.max_duration.as_deref().unwrap_or("30m"))?,
         max_temp_c: f64::from(settings.stress.max_temp_c.unwrap_or(95)),
-        threads: req.threads.unwrap_or_else(stress::all_threads),
+        threads: req.threads,
+        cpus: None,
+        smt: true,
         unmonitored: false,
         requested_by: Some(req.client.clone()),
         animate: stress::animate(false),
@@ -168,7 +170,8 @@ pub fn confirm(hub: &Hub, id: &str, settings: &Config) -> Result<(Report, u8), S
          {} °C), and you can stop it with Ctrl+C.",
         req.client,
         req.workload,
-        opts.threads,
+        req.threads
+            .map_or_else(|| "all".to_owned(), |t| t.to_string()),
         span(req.duration_ms),
         opts.max_temp_c,
     );

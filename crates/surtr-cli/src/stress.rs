@@ -38,11 +38,6 @@ pub fn runs_dir() -> Option<std::path::PathBuf> {
     paths::data_dir().map(|d| d.join("runs"))
 }
 
-/// One worker thread per logical CPU.
-pub fn all_threads() -> u32 {
-    std::thread::available_parallelism().map_or(1, |n| u32::try_from(n.get()).unwrap_or(1))
-}
-
 /// Records left running by a reset or crash, told to the user once.
 fn report_interrupted(ids: &[String]) {
     for id in ids {
@@ -74,8 +69,13 @@ pub struct Options {
     pub max_duration: Duration,
     /// Temperature limit in °C (`stress.max_temp_c`).
     pub max_temp_c: f64,
-    /// Worker threads.
-    pub threads: u32,
+    /// Worker threads (default: every logical CPU), placed one per physical
+    /// core before SMT siblings.
+    pub threads: Option<u32>,
+    /// Exactly these logical CPUs, one thread each (overrides `threads`).
+    pub cpus: Option<Vec<u32>>,
+    /// Use SMT siblings; when false, at most one thread per physical core.
+    pub smt: bool,
     /// Allow a short run without a temperature sensor.
     pub unmonitored: bool,
     /// The AI agent that asked for the run (`surtr runs confirm`).
@@ -157,6 +157,22 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
         );
     }
 
+    // Where the threads go: hand-picked, or one per core before siblings.
+    let topo = surtr_stress::topology::topology();
+    let cpus: Vec<u32> = match &opts.cpus {
+        Some(list) => {
+            surtr_stress::topology::check(&topo, list)?;
+            list.clone()
+        }
+        None => surtr_stress::topology::placement(&topo, opts.threads, opts.smt)?,
+    };
+    let threads = u32::try_from(cpus.len()).unwrap_or(u32::MAX);
+    let cpu_list = cpus
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+
     let stop = Arc::new(AtomicBool::new(false));
     {
         let stop = Arc::clone(&stop);
@@ -168,7 +184,9 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
         "worker",
         "cpu",
         "--threads",
-        &opts.threads.to_string(),
+        &threads.to_string(),
+        "--cpus",
+        &cpu_list,
         "--duration-ms",
         &duration.as_millis().to_string(),
     ]);
@@ -177,8 +195,8 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
         .map(|w| format!("{} {:.0} °C", w.label, w.stop_at))
         .collect();
     eprintln!(
-        "Stressing {} threads for {}; stops at {}. Press Ctrl+C to stop.",
-        opts.threads,
+        "Stressing {threads} threads on CPUs {cpu_list} for {}; stops at {}. Press Ctrl+C \
+         to stop.",
         span(u64::try_from(duration.as_millis()).unwrap_or(0)),
         if limits.is_empty() {
             "the time limit".to_owned()
@@ -211,7 +229,8 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
                 started: iso_utc(Timestamp::now()),
                 ended: None,
                 planned_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
-                threads: opts.threads,
+                threads,
+                cpus: cpus.clone(),
                 surtr: env!("CARGO_PKG_VERSION").to_owned(),
                 machine,
                 watched: watched.clone(),
@@ -230,17 +249,7 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
             None
         }
     };
-    // The flame view: one flame per thread, on the CPU its worker pins to.
-    let allowed = surtr_stress::cpu::allowed_cpus();
-    let cpus: Vec<u32> = (0..opts.threads)
-        .map(|t| {
-            if allowed.is_empty() {
-                t
-            } else {
-                allowed[t as usize % allowed.len()]
-            }
-        })
-        .collect();
+    // The flame view: one flame per thread, labeled with its CPU.
     let view_done = Arc::new(AtomicBool::new(false));
     let view = if opts.animate {
         let state = Arc::new(Mutex::new(Live {

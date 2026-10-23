@@ -16,6 +16,7 @@ pub mod html;
 pub mod record;
 pub mod request;
 pub mod runner;
+pub mod topology;
 
 /// How a workload must be run (plan, section 4, the isolation rule).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -29,10 +30,14 @@ pub enum Isolation {
 }
 
 /// What a workload is asked to do.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Params {
-    /// Worker threads; one per logical CPU is the usual choice.
+    /// Worker threads; one per logical CPU is the usual choice. Ignored
+    /// when `cpus` is given.
     pub threads: u32,
+    /// The logical CPU for each thread, as the host placed them
+    /// ([`topology::placement`]); empty means the worker decides.
+    pub cpus: Vec<u32>,
     /// How long to run.
     pub duration: Duration,
 }

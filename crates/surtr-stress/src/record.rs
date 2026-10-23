@@ -64,6 +64,9 @@ pub struct Record {
     pub planned_ms: u64,
     /// Worker threads.
     pub threads: u32,
+    /// The logical CPU of each thread, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cpus: Vec<u32>,
     /// Surtr version.
     pub surtr: String,
     /// The machine: CPU name and OS, as far as known.
@@ -211,6 +214,7 @@ mod tests {
             ended: None,
             planned_ms: 60_000,
             threads: 8,
+            cpus: Vec::new(),
             surtr: "0.1.0".to_owned(),
             machine: vec!["Test CPU".to_owned()],
             watched: Vec::new(),
