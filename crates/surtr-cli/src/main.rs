@@ -371,6 +371,17 @@ fn config_command(
 
 #[derive(Debug, Subcommand)]
 enum RunsCommand {
+    /// Confirm an AI agent's request to run a stress test; the run then
+    /// happens in this terminal.
+    Confirm {
+        /// The request code the agent gave you.
+        id: String,
+    },
+    /// Turn down an AI agent's request to run a stress test.
+    Deny {
+        /// The request code the agent gave you.
+        id: String,
+    },
     /// Show one run (`latest` for the newest).
     Show {
         /// Run id, as `surtr runs` lists it, or `latest`.
@@ -561,8 +572,10 @@ fn main() -> ExitCode {
     {
         return worker(workload, *threads, *duration_ms);
     }
-    // Past runs need no hardware access.
-    if let Some(Command::Runs { command }) = &cli.command {
+    // Past runs need no hardware access (confirming one starts a run).
+    if let Some(Command::Runs { command }) = &cli.command
+        && !matches!(command, Some(RunsCommand::Confirm { .. }))
+    {
         return match runs::command(command.as_ref(), cli.json) {
             Ok(text) => {
                 anstream::print!("{text}");
@@ -581,7 +594,12 @@ fn main() -> ExitCode {
     let embedded = cli.embedded
         || matches!(
             cli.command,
-            Some(Command::Serve { .. } | Command::Record { .. } | Command::Stress { .. })
+            Some(
+                Command::Serve { .. }
+                    | Command::Record { .. }
+                    | Command::Stress { .. }
+                    | Command::Runs { .. }
+            )
         );
     let result = hub(cli.mock, embedded)
         .and_then(|hub| run(&cli, &Arc::new(hub), &code, &settings).map_err(|e| e.to_string()));
@@ -596,6 +614,28 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The longest stress run an agent may request, in milliseconds, if the
+/// owner allows requests at all (`[mcp] allow_stress`).
+fn mcp_stress_ms(settings: &Config) -> Result<Option<u64>, String> {
+    if settings.mcp.allow_stress != Some(true) {
+        return Ok(None);
+    }
+    history::parse_duration_ms(settings.stress.max_duration.as_deref().unwrap_or("30m")).map(Some)
+}
+
+/// The MCP server: the read-only tools, recorded runs, and stress requests
+/// when `stress_ms` is set.
+pub(crate) fn mcp_server(hub: Arc<Hub>, db: PathBuf, stress_ms: Option<u64>) -> surtr_mcp::Server {
+    let mut server = surtr_mcp::Server::new(hub, db, Arc::new(|hub| diag::build(hub).summary));
+    if let Some(dir) = stress::runs_dir() {
+        server = server.with_runs(dir);
+    }
+    if let Some(ms) = stress_ms {
+        server = server.allow_stress(ms);
+    }
+    server
 }
 
 /// `surtr worker`: runs a workload and streams its events on stdout.
@@ -759,13 +799,18 @@ fn run(
                 duration: ms(duration.as_deref().unwrap_or("5m"))?,
                 max_duration,
                 max_temp_c: f64::from(settings.stress.max_temp_c.unwrap_or(95)),
-                threads: threads.unwrap_or_else(|| {
-                    thread::available_parallelism()
-                        .map_or(1, |n| u32::try_from(n.get()).unwrap_or(1))
-                }),
+                threads: threads.unwrap_or_else(stress::all_threads),
                 unmonitored: *unmonitored,
+                requested_by: None,
             };
-            let (report, exit) = stress::run(hub, &opts)?;
+            let (report, exit) = stress::run(hub, &opts, |_| {})?;
+            code.set(exit);
+            out(json!(report), stress::describe(&report))
+        }
+        Command::Runs {
+            command: Some(RunsCommand::Confirm { id }),
+        } => {
+            let (report, exit) = runs::confirm(hub, id, settings)?;
             code.set(exit);
             out(json!(report), stress::describe(&report))
         }
@@ -867,10 +912,10 @@ fn run(
             ..
         } => Ok(mcp_config::text(*client, &std::env::current_exe()?)),
         Command::Mcp { db, command: None } => {
-            let server = surtr_mcp::Server::new(
+            let server = mcp_server(
                 Arc::clone(hub),
                 db_path(db.as_ref(), settings)?,
-                Arc::new(|hub| diag::build(hub).summary),
+                mcp_stress_ms(settings)?,
             );
             // stdout carries the protocol; nothing else may be printed.
             tokio::runtime::Builder::new_current_thread()
@@ -907,6 +952,7 @@ fn run(
                     metrics_remote: *metrics_remote,
                     notify: settings.alerts.notify() && !*no_notify,
                     mcp: *mcp,
+                    mcp_stress: mcp_stress_ms(settings)?,
                     api: *api,
                 },
             )

@@ -33,6 +33,11 @@ pub const TEMPLATE: &str = r#"# Surtr settings. Every setting is optional; comma
 # max_temp_c = 95
 # The longest a stress test may run; --duration can't exceed it.
 # max_duration = "30m"
+
+[mcp]
+# Let AI agents ask for stress tests over MCP. Each run still starts only
+# when you type `surtr runs confirm <code>` in a terminal.
+# allow_stress = false
 "#;
 
 /// General settings.
@@ -76,6 +81,13 @@ pub struct Stress {
     pub max_duration: Option<String>,
 }
 
+/// MCP settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Mcp {
+    /// Let agents request stress runs (default: no).
+    pub allow_stress: Option<bool>,
+}
+
 /// All settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
@@ -91,6 +103,9 @@ pub struct Config {
     /// `[stress]`.
     #[serde(default)]
     pub stress: Stress,
+    /// `[mcp]`.
+    #[serde(default)]
+    pub mcp: Mcp,
 }
 
 /// Settings plus warnings about the file (unknown keys).
@@ -103,8 +118,9 @@ pub struct Loaded {
 }
 
 /// Keys Surtr knows, as `section.key`.
-const KNOWN: [&str; 7] = [
+const KNOWN: [&str; 8] = [
     "alerts.notify",
+    "mcp.allow_stress",
     "stress.max_temp_c",
     "stress.max_duration",
     "general.interval_ms",
@@ -167,6 +183,9 @@ impl Config {
             },
             alerts: Alerts {
                 notify: Some(self.alerts.notify()),
+            },
+            mcp: Mcp {
+                allow_stress: Some(self.mcp.allow_stress.unwrap_or(false)),
             },
             stress: Stress {
                 max_temp_c: Some(self.stress.max_temp_c.unwrap_or(95)),

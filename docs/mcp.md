@@ -6,10 +6,11 @@ supports stdio servers) starts it and can then ask about this machine's
 hardware: what is installed, what the sensors say now, what they said over
 the last hours, and why a GPU is slower than it should be.
 
-Every tool is **read-only**. Nothing an agent does through `surtr mcp` changes
-the hardware, the settings or the recorded history. Stress tests (M6) and
-tuning (M9) will be separate opt-in scopes with confirmation outside the
-agent; they are not part of this server today.
+By default every tool is **read-only**. Nothing an agent does through
+`surtr mcp` changes the hardware, the settings or the recorded history.
+Stress tests are a separate opt-in, and even then an agent can only *ask*:
+a person starts each run (see [Stress runs](#stress-runs)). Tuning (M9) is
+not part of this server.
 
 ## Setup
 
@@ -84,9 +85,45 @@ claude mcp add --transport http surtr http://127.0.0.1:7878/mcp \
 | `get_throttle_reasons` | Why each GPU is below its potential clock right now |
 | `query_history` | Recorded history: without `sensor`, the list of recorded sensors; with `sensor`, avg/min/max per bucket over the last `minutes` (default 60, at most 7 days) |
 | `get_diagnostics` | The redacted `surtr diag` summary as Markdown |
+| `list_runs` | Recorded stress runs, newest first, with result and peak temperature |
+| `get_run` | One run in full (`id` or `latest`): limits, wrong answers, per-second timeline |
 
 Results are JSON (Markdown for `get_diagnostics`). Times are UTC ISO 8601.
 Each sensor value also comes formatted with its unit (`"text": "56.0 °C"`).
+
+## Stress runs
+
+Off by default. With
+
+```toml
+[mcp]
+allow_stress = true
+```
+
+in `config.toml`, three more tools appear:
+
+| Tool | Does |
+|---|---|
+| `start_stress_test` | Files a **request** (`minutes`, `threads`) and returns a short code. Nothing runs yet. |
+| `get_run_status` | Where a request or run stands: pending, denied, expired, running, or its result |
+| `stop_stress_test` | Asks a running test to stop; stopping is always safe |
+
+A run starts only when a person types, in a terminal on the machine:
+
+```sh
+surtr runs confirm <code>     # shows who asked and what, asks y/N, runs here
+surtr runs deny <code>
+```
+
+- **Agents can't confirm.** Confirming needs an interactive terminal and a
+  typed `y`. MCP elicitation (a prompt the AI client draws) is never used,
+  since the client could answer it itself.
+- **The run happens in that terminal,** visible, with Ctrl+C, under the usual
+  limits: the temperature limit, the duration cap (`stress.max_duration`
+  also caps what an agent may ask for), and the refusal without a CPU
+  temperature sensor.
+- Requests expire after 10 minutes. Each run records which agent asked
+  (`requested_by`), and every call is in the audit log.
 
 ## Resources and prompts
 

@@ -28,6 +28,11 @@ pub fn runs_dir() -> Option<std::path::PathBuf> {
     paths::data_dir().map(|d| d.join("runs"))
 }
 
+/// One worker thread per logical CPU.
+pub fn all_threads() -> u32 {
+    std::thread::available_parallelism().map_or(1, |n| u32::try_from(n.get()).unwrap_or(1))
+}
+
 /// Records left running by a reset or crash, told to the user once.
 fn report_interrupted(ids: &[String]) {
     for id in ids {
@@ -63,6 +68,8 @@ pub struct Options {
     pub threads: u32,
     /// Allow a short run without a temperature sensor.
     pub unmonitored: bool,
+    /// The AI agent that asked for the run (`surtr runs confirm`).
+    pub requested_by: Option<String>,
 }
 
 /// Reads temperatures and clocks through the hub.
@@ -103,7 +110,7 @@ impl runner::Sensors for HubSensors<'_> {
 
 /// Runs the test; returns the report and the exit code (0 passed, 2 stopped
 /// early, 3 errors found or the worker failed).
-pub fn run(hub: &Hub, opts: &Options) -> Result<(Report, u8), String> {
+pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Report, u8), String> {
     if opts.duration > opts.max_duration {
         return Err(format!(
             "{} is longer than the {} limit (stress.max_duration in the settings)",
@@ -187,6 +194,7 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<(Report, u8), String> {
                 surtr: env!("CARGO_PKG_VERSION").to_owned(),
                 machine,
                 watched: watched.clone(),
+                requested_by: opts.requested_by.clone(),
                 errors_seen: 0,
                 timeline: Vec::new(),
                 report: None,
@@ -201,6 +209,23 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<(Report, u8), String> {
             None
         }
     };
+    if let (Some(j), Some(dir)) = (&journal, runs_dir()) {
+        on_start(&j.record.id);
+        // An agent may ask a run to stop (`stop_stress_test`) by leaving a
+        // file; stopping is always safe.
+        let stop = Arc::clone(&stop);
+        let file = surtr_stress::request::stop_path(&dir, &j.record.id);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                if file.exists() {
+                    let _ = std::fs::remove_file(&file);
+                    eprintln!("\nsurtr: stop requested through MCP");
+                    stop.store(true, Ordering::Relaxed);
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        });
+    }
     let live = std::io::stderr().is_terminal();
     let mut sensors = HubSensors {
         hub,

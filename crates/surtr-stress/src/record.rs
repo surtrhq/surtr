@@ -70,6 +70,10 @@ pub struct Record {
     pub machine: Vec<String>,
     /// Temperatures watched and their limits.
     pub watched: Vec<Watched>,
+    /// The AI agent that asked for the run, when one did (a person
+    /// confirmed it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_by: Option<String>,
     /// Wrong answers seen so far (the report has the details).
     pub errors_seen: u32,
     /// Once a second.
@@ -210,6 +214,7 @@ mod tests {
             surtr: "0.1.0".to_owned(),
             machine: vec!["Test CPU".to_owned()],
             watched: Vec::new(),
+            requested_by: None,
             errors_seen: 0,
             timeline: Vec::new(),
             report: None,

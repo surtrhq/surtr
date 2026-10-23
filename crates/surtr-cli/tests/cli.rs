@@ -717,8 +717,18 @@ fn alerts_rules_and_log() {
 /// Runs `surtr <args>` (which include `mcp`) and sends `calls` (method, params) after the
 /// handshake; returns the result of each call.
 fn mcp_session(args: &[&str], calls: &[(&str, Value)]) -> Vec<Value> {
+    mcp_session_with(&[], args, calls)
+}
+
+/// [`mcp_session`] with extra environment variables.
+fn mcp_session_with(
+    envs: &[(&str, &std::path::Path)],
+    args: &[&str],
+    calls: &[(&str, Value)],
+) -> Vec<Value> {
     use std::io::{BufRead, BufReader, Write};
     let mut child = surtr_command()
+        .envs(envs.iter().copied())
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -1528,5 +1538,175 @@ fn a_run_cut_short_is_recovered_as_interrupted() {
     assert_eq!(run["state"], "interrupted");
     assert!(run["report"].is_null());
     assert!(run["timeline"].as_array().unwrap().len() >= 2, "{run}");
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[test]
+fn mcp_stress_requests_need_opt_in_and_a_person() {
+    let call = |name: &str, arguments: Value| {
+        (
+            "tools/call",
+            serde_json::json!({ "name": name, "arguments": arguments }),
+        )
+    };
+    let tool_names = |list: &Value| -> Vec<String> {
+        list["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let data = data_dir("mcp-stress");
+    let config = data.join("config");
+    std::fs::create_dir_all(&config).unwrap();
+    let db = data.join("history.db");
+    let args = ["--mock", "mcp", "--db", db.to_str().unwrap()];
+    let envs = [
+        ("SURTR_DATA_DIR", data.as_path()),
+        ("SURTR_CONFIG_DIR", config.as_path()),
+    ];
+
+    // Off by default: the stress tools don't exist; recorded runs can be read.
+    let r = mcp_session_with(&envs, &args, &[("tools/list", serde_json::json!({}))]);
+    let names = tool_names(&r[0]);
+    assert!(!names.iter().any(|n| n == "start_stress_test"), "{names:?}");
+    assert!(names.iter().any(|n| n == "list_runs"));
+
+    std::fs::write(config.join("config.toml"), "[mcp]\nallow_stress = true\n").unwrap();
+    let r = mcp_session_with(
+        &envs,
+        &args,
+        &[
+            ("tools/list", serde_json::json!({})),
+            call("start_stress_test", serde_json::json!({ "minutes": 99 })),
+            call(
+                "start_stress_test",
+                serde_json::json!({ "minutes": 1, "threads": 1 }),
+            ),
+        ],
+    );
+    let names = tool_names(&r[0]);
+    for tool in ["start_stress_test", "get_run_status", "stop_stress_test"] {
+        assert!(names.iter().any(|n| n == tool), "{tool} missing");
+    }
+    // Starting is not read-only; the annotations say so.
+    let start = r[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "start_stress_test")
+        .unwrap();
+    assert_eq!(start["annotations"]["readOnlyHint"], false);
+    assert_eq!(r[1]["isError"], true, "longer than the owner's limit");
+    let asked = tool_text(&r[2]);
+    assert_eq!(asked["status"], "awaiting_confirmation");
+    let code = asked["request"].as_str().unwrap().to_owned();
+    assert!(
+        asked["next"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("surtr runs confirm {code}"))
+    );
+
+    // Nothing runs until a person confirms, and that needs a terminal.
+    let confirm = surtr_command()
+        .envs(envs)
+        .args(["--mock", "runs", "confirm", &code])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(confirm.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&confirm.stderr).contains("interactive terminal"));
+
+    let status = |code: &str| {
+        let r = mcp_session_with(
+            &envs,
+            &args,
+            &[call("get_run_status", serde_json::json!({ "id": code }))],
+        );
+        tool_text(&r[0])
+    };
+    assert_eq!(status(&code)["status"], "pending");
+
+    // The person says no.
+    let deny = surtr_command()
+        .envs(envs)
+        .args(["runs", "deny", &code])
+        .output()
+        .unwrap();
+    assert_eq!(deny.status.code(), Some(0));
+    assert_eq!(status(&code)["status"], "denied");
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[test]
+fn mcp_can_stop_a_running_stress_test() {
+    let data = data_dir("mcp-stop");
+    let db = data.join("history.db");
+    // The stop tool comes with the stress opt-in.
+    let config = data.join("config");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.toml"),
+        "[mcp]
+allow_stress = true
+",
+    )
+    .unwrap();
+    let host = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args([
+            "--mock",
+            "--json",
+            "stress",
+            "cpu",
+            "--duration",
+            "30s",
+            "--threads",
+            "1",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    // Wait until the run is recorded as running.
+    let args = ["--mock", "mcp", "--db", db.to_str().unwrap()];
+    let envs = [
+        ("SURTR_DATA_DIR", data.as_path()),
+        ("SURTR_CONFIG_DIR", config.as_path()),
+    ];
+    let call = |name: &str| {
+        (
+            "tools/call",
+            serde_json::json!({ "name": name, "arguments": { "id": "latest" } }),
+        )
+    };
+    let mut stopped = Value::Null;
+    for _ in 0..50 {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let r = mcp_session_with(&envs, &args, &[call("stop_stress_test")]);
+        stopped = tool_text(&r[0]);
+        if stopped["status"] == "stop requested" {
+            break;
+        }
+    }
+    assert_eq!(stopped["status"], "stop requested", "{stopped}");
+    let out = host.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "stopped early");
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["outcome"]["result"], "stopped");
+    assert!(v["duration_ms"].as_u64().unwrap() < 20_000);
+
+    let r = mcp_session_with(
+        &envs,
+        &args,
+        &[(
+            "tools/call",
+            serde_json::json!({ "name": "list_runs", "arguments": {} }),
+        )],
+    );
+    let runs = tool_text(&r[0]);
+    assert_eq!(runs["runs"][0]["state"], "done");
     let _ = std::fs::remove_dir_all(&data);
 }

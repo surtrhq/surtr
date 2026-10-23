@@ -43,6 +43,9 @@ pub struct Options {
     pub notify: bool,
     /// Where to serve MCP over HTTP, if anywhere (loopback only).
     pub mcp: Option<SocketAddr>,
+    /// The longest stress run MCP clients may request, in milliseconds, if
+    /// the owner allows requests.
+    pub mcp_stress: Option<u64>,
     /// Where to serve the REST and WebSocket API, if anywhere (loopback
     /// only).
     pub api: Option<SocketAddr>,
@@ -273,11 +276,8 @@ pub fn run(hub: &Hub, opts: &Options) -> Result<String, Box<dyn Error>> {
     let mcp = match opts.mcp {
         Some(addr) => {
             let listener = runtime.block_on(tokio::net::TcpListener::bind(addr))?;
-            let server = surtr_mcp::Server::new(
-                Arc::clone(&snapshot_hub),
-                opts.db.clone(),
-                Arc::new(|hub| crate::diag::build(hub).summary),
-            );
+            let server =
+                crate::mcp_server(Arc::clone(&snapshot_hub), opts.db.clone(), opts.mcp_stress);
             eprintln!(
                 "Serving MCP on http://{}/mcp (bearer token: surtr token)",
                 listener.local_addr()?

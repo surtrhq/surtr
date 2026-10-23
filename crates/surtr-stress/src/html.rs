@@ -150,6 +150,9 @@ pub fn report(record: &Record) -> String {
         ("Machine", record.machine.join(" · ")),
         ("Surtr", record.surtr.clone()),
     ];
+    if let Some(agent) = &record.requested_by {
+        rows.push(("Requested by", format!("{agent} (confirmed by a person)")));
+    }
     let peak = report.and_then(|r| r.peak_temp_c).or_else(|| {
         record
             .timeline
@@ -271,6 +274,7 @@ mod tests {
                 label: "Tctl".into(),
                 stop_at: 95.0,
             }],
+            requested_by: None,
             errors_seen: 1,
             timeline: (0..5)
                 .map(|s| Tick {

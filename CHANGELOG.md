@@ -18,6 +18,10 @@ change commands and JSON output.
   interrupted with what it recorded up to then; HTML reports with charts.
 - Sensors carry the limits the hardware reports; `status` and alerts use
   them.
+- MCP: `list_runs` and `get_run` read recorded stress runs. With
+  `[mcp] allow_stress = true`, agents can request a stress test
+  (`start_stress_test`), check it and stop it; every run still starts only
+  when a person types `surtr runs confirm <code>` in a terminal.
 
 ### Fixed
 - Linux: impossible placeholder temperatures (-273.2 °C) are no longer shown.

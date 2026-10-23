@@ -9,10 +9,13 @@ publish.workspace = true
 
 [dependencies]
 surtr-api.workspace = true
+surtr-stress.workspace = true
 surtr-core.workspace = true
 surtr-model.workspace = true
 surtr-view.workspace = true
 serde_json.workspace = true
+serde.workspace = true
+schemars = "1"
 rmcp = { version = "3.6", default-features = false, features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
 tokio = { version = "1", default-features = false, features = ["rt"] }
 tracing = "0.1"

@@ -1,11 +1,20 @@
 //! `surtr runs`: past stress runs, and HTML reports of them.
 
-use std::{fmt::Write as _, fs};
+use std::{
+    fmt::Write as _,
+    fs,
+    io::{self, BufRead, IsTerminal, Write as _},
+    time::Duration,
+};
 
 use serde_json::json;
+use surtr_core::{Hub, config::Config};
+use surtr_model::Timestamp;
 use surtr_stress::{
     html::{self, span},
     record::{self, Record, State},
+    request::{self, RequestState},
+    runner::Report,
 };
 
 use crate::{RunsCommand, stress};
@@ -104,6 +113,18 @@ pub fn command(command: Option<&RunsCommand>, json: bool) -> Result<String, Stri
             }
             Ok(out)
         }
+        Some(RunsCommand::Deny { id }) => {
+            let mut req = request::load(&dir, id, Timestamp::now().0)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("no request {id}"))?;
+            if req.state != RequestState::Pending {
+                return Err(format!("request {id} is {:?}, not pending", req.state).to_lowercase());
+            }
+            req.state = RequestState::Denied;
+            request::save(&dir, &req).map_err(|e| e.to_string())?;
+            Ok(format!("Turned down request {id} from {}.\n", req.client))
+        }
+        Some(RunsCommand::Confirm { .. }) => unreachable!("needs the hardware; see confirm"),
         Some(RunsCommand::Report { id, out }) => {
             let r = find(id)?;
             let path = out
@@ -113,4 +134,58 @@ pub fn command(command: Option<&RunsCommand>, json: bool) -> Result<String, Stri
             Ok(format!("Wrote {}\n", path.display()))
         }
     }
+}
+
+/// `surtr runs confirm <id>`: a person confirms an AI agent's request, and
+/// the run happens here, in this terminal, under the usual limits. Agents
+/// can't confirm their own requests: this needs an interactive terminal and
+/// a typed "y".
+pub fn confirm(hub: &Hub, id: &str, settings: &Config) -> Result<(Report, u8), String> {
+    let dir = stress::runs_dir().ok_or("no per-user data directory found")?;
+    let mut req = request::load(&dir, id, Timestamp::now().0)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no request {id}"))?;
+    if req.state != RequestState::Pending {
+        return Err(format!("request {id} is {:?}, not pending", req.state).to_lowercase());
+    }
+    if !io::stdin().is_terminal() {
+        return Err("confirming a stress run needs a person at an interactive terminal".to_owned());
+    }
+    let ms = |t: &str| crate::history::parse_duration_ms(t).map(Duration::from_millis);
+    let opts = stress::Options {
+        duration: Duration::from_millis(req.duration_ms),
+        max_duration: ms(settings.stress.max_duration.as_deref().unwrap_or("30m"))?,
+        max_temp_c: f64::from(settings.stress.max_temp_c.unwrap_or(95)),
+        threads: req.threads.unwrap_or_else(stress::all_threads),
+        unmonitored: false,
+        requested_by: Some(req.client.clone()),
+    };
+    eprintln!(
+        "{} asks to run the {} stress test: {} threads for {}.\n\
+         It heats the machine and slows everything else down; on an unstable machine it can \
+         crash it and lose unsaved work. It stops at the temperature limit (stress.max_temp_c, \
+         {} °C), and you can stop it with Ctrl+C.",
+        req.client,
+        req.workload,
+        opts.threads,
+        span(req.duration_ms),
+        opts.max_temp_c,
+    );
+    eprint!("Run it now in this terminal? [y/N] ");
+    io::stderr().flush().map_err(|e| e.to_string())?;
+    let mut answer = String::new();
+    io::stdin()
+        .lock()
+        .read_line(&mut answer)
+        .map_err(|e| e.to_string())?;
+    if !matches!(answer.trim(), "y" | "Y" | "yes") {
+        req.state = RequestState::Denied;
+        request::save(&dir, &req).map_err(|e| e.to_string())?;
+        return Err(format!("turned down request {id}"));
+    }
+    stress::run(hub, &opts, |run| {
+        req.state = RequestState::Started;
+        req.run = Some(run.to_owned());
+        let _ = request::save(&dir, &req);
+    })
 }
