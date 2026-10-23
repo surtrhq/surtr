@@ -4,7 +4,13 @@ All notable changes to Surtr are listed here. Surtr follows
 [Semantic Versioning](https://semver.org/); before 1.0, minor versions may
 change commands and JSON output.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-23
+
+The stress tests tuners use: one core at a time for per-core tuning, a
+load that switches on and off for idle-to-boost crashes, SIMD for the
+highest power draw, and cache- and memory-sized tests for the memory
+controller. All verified, all under the same limits; tested on a Ryzen 5
+3500U and a hybrid Intel CPU.
 
 ### Added
 - `surtr stress cpu --per-core [--each 1m] [--siblings]`: one physical core
@@ -23,6 +29,11 @@ change commands and JSON output.
   threads together, with gaps long enough for deep idle; catches crashes at
   idle-to-boost transitions that steady load never triggers. Works with
   `--per-core`.
+
+### Fixed
+- `surtr tui` over SSH: moving the mouse no longer switches tabs. The TUI
+  asks for clicks and the wheel only, and rebuilds key and mouse sequences
+  that arrive in pieces instead of reading them as keys.
 
 ## [0.2.0] - 2026-10-23
 
