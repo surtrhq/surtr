@@ -18,6 +18,7 @@ pub mod pattern;
 pub mod record;
 pub mod request;
 pub mod runner;
+pub mod simd;
 pub mod topology;
 
 /// How a workload must be run (plan, section 4, the isolation rule).
@@ -44,6 +45,30 @@ pub struct Params {
     pub duration: Duration,
     /// Steady, or switching on and off.
     pub pattern: pattern::Pattern,
+    /// Which computations to run.
+    pub kernels: Kernels,
+}
+
+/// Which computations the CPU test runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Kernels {
+    /// Integer and scalar floating point (the default).
+    #[default]
+    Mixed,
+    /// Fused multiply-add on wide vectors (AVX-512, AVX2 or NEON): the
+    /// highest power draw.
+    Simd,
+}
+
+impl Kernels {
+    /// Its name, as in `--kernel`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Mixed => "mixed",
+            Self::Simd => "simd",
+        }
+    }
 }
 
 /// A built-in stress test. It runs inside the worker and writes run events

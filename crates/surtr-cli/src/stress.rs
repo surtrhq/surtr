@@ -82,6 +82,8 @@ pub struct Options {
     pub siblings: bool,
     /// Steady load, or switching on and off.
     pub pattern: surtr_stress::pattern::Pattern,
+    /// Which computations to run.
+    pub kernels: surtr_stress::Kernels,
     /// Allow a short run without a temperature sensor.
     pub unmonitored: bool,
     /// The AI agent that asked for the run (`surtr runs confirm`).
@@ -145,8 +147,15 @@ impl runner::Sensors for HubSensors<'_> {
 
 /// The run's test name: `cpu`, with `-per-core` and `-transient` as
 /// they apply, so runs of different kinds don't compare silently.
-fn workload_name(per_core: bool, pattern: surtr_stress::pattern::Pattern) -> String {
+fn workload_name(
+    per_core: bool,
+    pattern: surtr_stress::pattern::Pattern,
+    kernels: surtr_stress::Kernels,
+) -> String {
     let mut name = "cpu".to_owned();
+    if kernels == surtr_stress::Kernels::Simd {
+        name.push_str("-simd");
+    }
     if per_core {
         name.push_str("-per-core");
     }
@@ -319,7 +328,7 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
             let record = Record {
                 schema: record::SCHEMA,
                 id: new_id(&dir, "cpu"),
-                workload: workload_name(per_core, opts.pattern),
+                workload: workload_name(per_core, opts.pattern, opts.kernels),
                 state: State::Running,
                 started: iso_utc(Timestamp::now()),
                 ended: None,
@@ -348,7 +357,7 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
     let view_done = Arc::new(AtomicBool::new(false));
     let view = if opts.animate {
         let state = Arc::new(Mutex::new(Live {
-            workload: workload_name(per_core, opts.pattern)
+            workload: workload_name(per_core, opts.pattern, opts.kernels)
                 .trim_start_matches("cpu-")
                 .replace('-', " "),
             planned_ms: ms(total),
@@ -441,6 +450,8 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
             &seg.duration.as_millis().to_string(),
             "--pattern",
             opts.pattern.name(),
+            "--kernels",
+            opts.kernels.name(),
         ]);
         // Each segment's thread i is the run's CPU at this position.
         let pos: Vec<usize> = seg.cpus.iter().map(|&c| position(c)).collect();
@@ -618,6 +629,11 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
         failures,
         peak_temp_c: peak,
         watched: watched.clone(),
+        // Every segment runs the same computations.
+        kernels: results
+            .first()
+            .map(|(_, r)| r.kernels.clone())
+            .unwrap_or_default(),
         per_core: per_core_results,
     };
 
@@ -666,6 +682,9 @@ pub fn describe(r: &Report) -> String {
         Outcome::WorkerFailed { reason } => format!("FAILED: {reason}"),
     };
     let _ = writeln!(out, "{verdict}");
+    if !r.kernels.is_empty() {
+        let _ = writeln!(out, "  computations: {}", r.kernels.join(", "));
+    }
     let total: u64 = r.iterations.iter().sum();
     let _ = writeln!(
         out,

@@ -19,7 +19,7 @@ use std::{
 };
 
 use crate::{
-    Isolation, Params, Workload,
+    Isolation, Kernels, Params, Workload,
     event::{Event, SCHEMA},
     pattern::{Pattern, Schedule},
 };
@@ -80,7 +80,15 @@ fn float(seed: u64) -> u64 {
 /// A kernel: its name and the computation.
 type Kernel = (&'static str, fn(u64) -> u64);
 
-const KERNELS: [Kernel; 2] = [("integer", integer), ("float", float)];
+const MIXED: [Kernel; 2] = [("integer", integer), ("float", float)];
+
+/// The kernels for `set`, picking the best SIMD variant this CPU runs.
+fn kernels(set: Kernels) -> Vec<Kernel> {
+    match set {
+        Kernels::Mixed => MIXED.to_vec(),
+        Kernels::Simd => vec![crate::simd::best()],
+    }
+}
 
 /// The logical CPUs this process may run on (a cgroup, `taskset` or job
 /// object may allow fewer than the machine has), in order. Empty where the
@@ -183,7 +191,8 @@ impl Workload for Cpu {
 /// the process.
 pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
     // The answers, worked out before any heavy load.
-    let expected: Vec<Vec<u64>> = KERNELS
+    let kernels = Arc::new(kernels(params.kernels));
+    let expected: Vec<Vec<u64>> = kernels
         .iter()
         .map(|(_, k)| SEEDS.iter().map(|&s| k(s)).collect())
         .collect();
@@ -214,6 +223,7 @@ pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
             schema: SCHEMA,
             workload: "cpu".to_owned(),
             threads,
+            kernels: kernels.iter().map(|(n, _)| (*n).to_owned()).collect(),
         }
         .to_line()
     )?;
@@ -221,13 +231,14 @@ pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
 
     let handles: Vec<_> = (0..threads)
         .map(|t| {
-            let (expected, counts, stop, errors, allowed, schedule) = (
+            let (expected, counts, stop, errors, allowed, schedule, kernels) = (
                 Arc::clone(&expected),
                 Arc::clone(&counts),
                 Arc::clone(&stop),
                 errors.clone(),
                 Arc::clone(&allowed),
                 Arc::clone(&schedule),
+                Arc::clone(&kernels),
             );
             thread::spawn(move || {
                 let cpu = (!allowed.is_empty())
@@ -246,7 +257,7 @@ pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
                         continue;
                     }
                     let s = round % SEEDS.len();
-                    for (k, (name, kernel)) in KERNELS.iter().enumerate() {
+                    for (k, (name, kernel)) in kernels.iter().enumerate() {
                         let got = black_box(kernel(black_box(SEEDS[s])));
                         if got != expected[k][s] && reported < REPORTED_PER_THREAD {
                             reported += 1;
@@ -327,7 +338,7 @@ mod tests {
 
     #[test]
     fn kernels_are_deterministic_and_seed_dependent() {
-        for (_, k) in KERNELS {
+        for (_, k) in MIXED {
             assert_eq!(k(SEEDS[0]), k(SEEDS[0]));
             assert_ne!(k(SEEDS[0]), k(SEEDS[1]));
         }
@@ -342,6 +353,7 @@ mod tests {
                 cpus: Vec::new(),
                 duration: Duration::from_millis(1300),
                 pattern: Pattern::Steady,
+                kernels: Kernels::Mixed,
             },
             &mut out,
         )

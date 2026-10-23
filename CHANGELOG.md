@@ -11,6 +11,10 @@ change commands and JSON output.
   at a time, each in turn, with a result, peak clock, throughput and peak
   temperature per core; finds the weak core in per-core tuning (Curve
   Optimizer, per-core undervolts). Hybrid CPUs show P- and E-cores.
+- `surtr stress cpu --kernel simd`: fused multiply-add on wide vectors
+  (AVX-512, AVX2 or NEON, picked at run time), running the FMA units at
+  their peak for the highest power draw; the report names the instruction
+  set used.
 - `surtr stress cpu --pattern transient`: load switching on and off, all
   threads together, with gaps long enough for deep idle; catches crashes at
   idle-to-boost transitions that steady load never triggers. Works with

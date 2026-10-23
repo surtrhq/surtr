@@ -1906,3 +1906,32 @@ fn transient_pattern_runs_and_is_named() {
     assert_eq!(r["workload"], "cpu-transient");
     let _ = std::fs::remove_dir_all(&data);
 }
+
+#[test]
+fn simd_kernel_runs_and_says_which() {
+    let data = data_dir("simd");
+    let out = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args(["--mock", "--json", "stress", "cpu", "--kernel", "simd"])
+        .args(["--duration", "2s", "--threads", "1"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["outcome"]["result"], "passed");
+    let kernel = v["kernels"][0].as_str().unwrap();
+    assert!(kernel.starts_with("fma-"), "{kernel}");
+    let run = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args(["--json", "runs", "show", "latest"])
+        .output()
+        .unwrap();
+    let r: Value = serde_json::from_slice(&run.stdout).unwrap();
+    assert_eq!(r["workload"], "cpu-simd");
+    let _ = std::fs::remove_dir_all(&data);
+}

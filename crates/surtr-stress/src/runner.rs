@@ -115,6 +115,9 @@ pub struct Report {
     pub peak_temp_c: Option<f64>,
     /// The temperatures watched and their limits.
     pub watched: Vec<Watched>,
+    /// The computations the worker ran, for example `fma-avx2`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kernels: Vec<String>,
     /// With `--per-core`, each core's own result, in the order tested.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub per_core: Vec<CoreResult>,
@@ -200,6 +203,7 @@ pub fn run(
         failures: Vec::new(),
         peak_temp_c: None,
         watched: watched.to_vec(),
+        kernels: Vec::new(),
         per_core: Vec::new(),
     };
     let mut ended: Option<Outcome> = None;
@@ -209,7 +213,12 @@ pub fn run(
         match inbox.recv_timeout(Duration::from_millis(500)) {
             Ok(event) => {
                 match &event {
-                    Event::Started { threads, .. } => report.threads = *threads,
+                    Event::Started {
+                        threads, kernels, ..
+                    } => {
+                        report.threads = *threads;
+                        report.kernels.clone_from(kernels);
+                    }
                     Event::Progress { iterations, .. } => report.iterations.clone_from(iterations),
                     Event::Error {
                         thread,

@@ -244,6 +244,7 @@ mod tests {
             failures: Vec::new(),
             peak_temp_c: Some(80.0),
             watched: Vec::new(),
+            kernels: Vec::new(),
             per_core: Vec::new(),
         }
     }

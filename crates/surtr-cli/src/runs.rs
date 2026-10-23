@@ -165,6 +165,7 @@ pub fn confirm(hub: &Hub, id: &str, settings: &Config) -> Result<(Report, u8), S
         per_core: None,
         siblings: false,
         pattern: surtr_stress::pattern::Pattern::Steady,
+        kernels: surtr_stress::Kernels::Mixed,
         unmonitored: false,
         requested_by: Some(req.client.clone()),
         animate: stress::animate(false),

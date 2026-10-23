@@ -19,6 +19,9 @@ pub enum Event {
         workload: String,
         /// Worker threads.
         threads: u32,
+        /// The computations it runs, for example `fma-avx2`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        kernels: Vec<String>,
     },
     /// Completed iterations per thread so far, about once a second.
     Progress {
@@ -63,6 +66,17 @@ mod tests {
 
     #[test]
     fn lines_round_trip() {
+        let started = Event::Started {
+            schema: SCHEMA,
+            workload: "cpu".into(),
+            threads: 2,
+            kernels: Vec::new(),
+        };
+        // Older lines without kernels still parse.
+        assert_eq!(
+            Event::parse(r#"{"event":"started","schema":1,"workload":"cpu","threads":2}"#),
+            Some(started)
+        );
         let e = Event::Error {
             thread: 3,
             cpu: Some(3),

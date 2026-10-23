@@ -216,6 +216,9 @@ enum Command {
         /// The load pattern.
         #[arg(long, value_enum, default_value_t = LoadPattern::Steady)]
         pattern: LoadPattern,
+        /// The computations.
+        #[arg(long, value_enum, default_value_t = KernelSet::Mixed)]
+        kernels: KernelSet,
     },
     /// Run in the background: poll sensors, record history and, with
     /// --metrics, serve Prometheus metrics. Stop with Ctrl+C.
@@ -412,6 +415,22 @@ enum RunsCommand {
     },
 }
 
+/// `--kernel` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum KernelSet {
+    Mixed,
+    Simd,
+}
+
+impl From<KernelSet> for surtr_stress::Kernels {
+    fn from(k: KernelSet) -> Self {
+        match k {
+            KernelSet::Mixed => Self::Mixed,
+            KernelSet::Simd => Self::Simd,
+        }
+    }
+}
+
 /// `--pattern` values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 enum LoadPattern {
@@ -468,6 +487,11 @@ enum StressCommand {
         /// With --per-core, load both SMT siblings of each core.
         #[arg(long, requires = "per_core")]
         siblings: bool,
+        /// mixed: integer and floating point. simd: fused multiply-add on
+        /// wide vectors (AVX-512, AVX2 or NEON, whichever the CPU has), the
+        /// highest power draw; undervolts often fail only under it.
+        #[arg(long, value_enum, default_value_t = KernelSet::Mixed)]
+        kernel: KernelSet,
         /// steady: full load all the time. transient: load switching on and
         /// off, all threads together, with idle gaps long enough for deep
         /// idle; catches crashes at idle-to-boost transitions that steady
@@ -631,9 +655,17 @@ fn main() -> ExitCode {
         cpus,
         duration_ms,
         pattern,
+        kernels,
     }) = &cli.command
     {
-        return worker(workload, *threads, cpus, *duration_ms, (*pattern).into());
+        return worker(
+            workload,
+            *threads,
+            cpus,
+            *duration_ms,
+            (*pattern).into(),
+            (*kernels).into(),
+        );
     }
     // Past runs need no hardware access (confirming one starts a run).
     if let Some(Command::Runs { command }) = &cli.command
@@ -708,6 +740,7 @@ fn worker(
     cpus: &[u32],
     duration_ms: u64,
     pattern: surtr_stress::pattern::Pattern,
+    kernels: surtr_stress::Kernels,
 ) -> ExitCode {
     let Some(workload) = surtr_stress::workload(workload) else {
         eprintln!("surtr: unknown workload {workload}");
@@ -718,6 +751,7 @@ fn worker(
         cpus: cpus.to_vec(),
         duration: Duration::from_millis(duration_ms),
         pattern,
+        kernels,
     };
     match workload.run(params, &mut std::io::stdout().lock()) {
         Ok(()) => ExitCode::SUCCESS,
@@ -869,6 +903,7 @@ fn run(
                     each,
                     siblings,
                     pattern,
+                    kernel,
                 },
         } => {
             let ms = |text: &str| history::parse_duration_ms(text).map(Duration::from_millis);
@@ -887,6 +922,7 @@ fn run(
                 },
                 siblings: *siblings,
                 pattern: (*pattern).into(),
+                kernels: (*kernel).into(),
                 unmonitored: *unmonitored,
                 requested_by: None,
                 animate: !cli.json && stress::animate(*plain),

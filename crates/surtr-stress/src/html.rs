@@ -342,6 +342,7 @@ mod tests {
                 }],
                 peak_temp_c: Some(64.0),
                 watched: Vec::new(),
+                kernels: Vec::new(),
                 per_core: Vec::new(),
             }),
         }
