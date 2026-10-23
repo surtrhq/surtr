@@ -12,7 +12,7 @@ use std::{
 };
 
 use ratatui::crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture},
+    event::{self, DisableMouseCapture},
     execute,
 };
 use surtr_core::Hub;
@@ -44,7 +44,7 @@ fn mouse_on() -> io::Result<()> {
 /// sequences to split.
 #[cfg(not(unix))]
 fn mouse_on() -> io::Result<()> {
-    execute!(io::stdout(), EnableMouseCapture)
+    execute!(io::stdout(), event::EnableMouseCapture)
 }
 
 /// Runs the TUI on the current terminal until the user quits, refreshing
