@@ -21,6 +21,7 @@ use std::{
 use crate::{
     Isolation, Params, Workload,
     event::{Event, SCHEMA},
+    pattern::{Pattern, Schedule},
 };
 
 /// Seeds each kernel cycles through, so a thread never repeats one result.
@@ -195,6 +196,8 @@ pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
     let counts: Arc<Vec<AtomicU64>> = Arc::new((0..threads).map(|_| AtomicU64::new(0)).collect());
     let stop = Arc::new(AtomicBool::new(false));
     let start = Instant::now();
+    let schedule =
+        Arc::new((params.pattern == Pattern::Transient).then(|| Schedule::new(params.duration)));
     let (errors, inbox) = mpsc::channel::<Event>();
     // The host's placement, else thread t on the t-th CPU this process may
     // use.
@@ -218,12 +221,13 @@ pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
 
     let handles: Vec<_> = (0..threads)
         .map(|t| {
-            let (expected, counts, stop, errors, allowed) = (
+            let (expected, counts, stop, errors, allowed, schedule) = (
                 Arc::clone(&expected),
                 Arc::clone(&counts),
                 Arc::clone(&stop),
                 errors.clone(),
                 Arc::clone(&allowed),
+                Arc::clone(&schedule),
             );
             thread::spawn(move || {
                 let cpu = (!allowed.is_empty())
@@ -232,6 +236,15 @@ pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
                 let mut reported = 0;
                 let mut round = 0usize;
                 while !stop.load(Ordering::Relaxed) {
+                    // Transient: every thread rests through the same gaps.
+                    if let Some(rest) = schedule
+                        .as_ref()
+                        .as_ref()
+                        .and_then(|sch| sch.idle_for(elapsed_ms(start)))
+                    {
+                        thread::sleep(rest.min(Duration::from_millis(100)));
+                        continue;
+                    }
                     let s = round % SEEDS.len();
                     for (k, (name, kernel)) in KERNELS.iter().enumerate() {
                         let got = black_box(kernel(black_box(SEEDS[s])));
@@ -328,6 +341,7 @@ mod tests {
                 threads: 2,
                 cpus: Vec::new(),
                 duration: Duration::from_millis(1300),
+                pattern: Pattern::Steady,
             },
             &mut out,
         )

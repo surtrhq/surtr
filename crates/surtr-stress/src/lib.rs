@@ -14,6 +14,7 @@ pub mod compare;
 pub mod cpu;
 pub mod event;
 pub mod html;
+pub mod pattern;
 pub mod record;
 pub mod request;
 pub mod runner;
@@ -41,6 +42,8 @@ pub struct Params {
     pub cpus: Vec<u32>,
     /// How long to run.
     pub duration: Duration,
+    /// Steady, or switching on and off.
+    pub pattern: pattern::Pattern,
 }
 
 /// A built-in stress test. It runs inside the worker and writes run events

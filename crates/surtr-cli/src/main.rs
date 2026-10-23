@@ -213,6 +213,9 @@ enum Command {
         /// How long to run, in milliseconds.
         #[arg(long)]
         duration_ms: u64,
+        /// The load pattern.
+        #[arg(long, value_enum, default_value_t = LoadPattern::Steady)]
+        pattern: LoadPattern,
     },
     /// Run in the background: poll sensors, record history and, with
     /// --metrics, serve Prometheus metrics. Stop with Ctrl+C.
@@ -409,6 +412,22 @@ enum RunsCommand {
     },
 }
 
+/// `--pattern` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum LoadPattern {
+    Steady,
+    Transient,
+}
+
+impl From<LoadPattern> for surtr_stress::pattern::Pattern {
+    fn from(p: LoadPattern) -> Self {
+        match p {
+            LoadPattern::Steady => Self::Steady,
+            LoadPattern::Transient => Self::Transient,
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 enum StressCommand {
     /// Load every CPU thread with computations whose answers are known, and
@@ -449,6 +468,12 @@ enum StressCommand {
         /// With --per-core, load both SMT siblings of each core.
         #[arg(long, requires = "per_core")]
         siblings: bool,
+        /// steady: full load all the time. transient: load switching on and
+        /// off, all threads together, with idle gaps long enough for deep
+        /// idle; catches crashes at idle-to-boost transitions that steady
+        /// load never triggers.
+        #[arg(long, value_enum, default_value_t = LoadPattern::Steady)]
+        pattern: LoadPattern,
     },
 }
 
@@ -605,9 +630,10 @@ fn main() -> ExitCode {
         threads,
         cpus,
         duration_ms,
+        pattern,
     }) = &cli.command
     {
-        return worker(workload, *threads, cpus, *duration_ms);
+        return worker(workload, *threads, cpus, *duration_ms, (*pattern).into());
     }
     // Past runs need no hardware access (confirming one starts a run).
     if let Some(Command::Runs { command }) = &cli.command
@@ -676,7 +702,13 @@ pub(crate) fn mcp_server(hub: Arc<Hub>, db: PathBuf, stress_ms: Option<u64>) -> 
 }
 
 /// `surtr worker`: runs a workload and streams its events on stdout.
-fn worker(workload: &str, threads: u32, cpus: &[u32], duration_ms: u64) -> ExitCode {
+fn worker(
+    workload: &str,
+    threads: u32,
+    cpus: &[u32],
+    duration_ms: u64,
+    pattern: surtr_stress::pattern::Pattern,
+) -> ExitCode {
     let Some(workload) = surtr_stress::workload(workload) else {
         eprintln!("surtr: unknown workload {workload}");
         return ExitCode::FAILURE;
@@ -685,6 +717,7 @@ fn worker(workload: &str, threads: u32, cpus: &[u32], duration_ms: u64) -> ExitC
         threads,
         cpus: cpus.to_vec(),
         duration: Duration::from_millis(duration_ms),
+        pattern,
     };
     match workload.run(params, &mut std::io::stdout().lock()) {
         Ok(()) => ExitCode::SUCCESS,
@@ -835,6 +868,7 @@ fn run(
                     per_core,
                     each,
                     siblings,
+                    pattern,
                 },
         } => {
             let ms = |text: &str| history::parse_duration_ms(text).map(Duration::from_millis);
@@ -852,6 +886,7 @@ fn run(
                     None
                 },
                 siblings: *siblings,
+                pattern: (*pattern).into(),
                 unmonitored: *unmonitored,
                 requested_by: None,
                 animate: !cli.json && stress::animate(*plain),

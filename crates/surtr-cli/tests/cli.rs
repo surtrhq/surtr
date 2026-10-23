@@ -1866,3 +1866,43 @@ fn per_core_tests_each_core_in_turn() {
     }
     let _ = std::fs::remove_dir_all(&data);
 }
+
+#[test]
+fn transient_pattern_runs_and_is_named() {
+    let data = data_dir("transient");
+    let out = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args([
+            "--mock",
+            "--json",
+            "stress",
+            "cpu",
+            "--duration",
+            "2s",
+            "--threads",
+            "1",
+        ])
+        .args(["--pattern", "transient"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["outcome"]["result"], "passed");
+    assert!(
+        v["iterations"][0].as_u64().unwrap() > 0,
+        "it loads between the gaps"
+    );
+    let run = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args(["--json", "runs", "show", "latest"])
+        .output()
+        .unwrap();
+    let r: Value = serde_json::from_slice(&run.stdout).unwrap();
+    assert_eq!(r["workload"], "cpu-transient");
+    let _ = std::fs::remove_dir_all(&data);
+}

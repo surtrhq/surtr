@@ -80,6 +80,8 @@ pub struct Options {
     pub per_core: Option<Duration>,
     /// With `per_core`, load both SMT siblings of each core.
     pub siblings: bool,
+    /// Steady load, or switching on and off.
+    pub pattern: surtr_stress::pattern::Pattern,
     /// Allow a short run without a temperature sensor.
     pub unmonitored: bool,
     /// The AI agent that asked for the run (`surtr runs confirm`).
@@ -139,6 +141,19 @@ impl runner::Sensors for HubSensors<'_> {
     fn clock(&mut self, cpu: u32) -> Option<f64> {
         self.clocks.iter().find(|(c, _)| *c == cpu).map(|(_, v)| *v)
     }
+}
+
+/// The run's test name: `cpu`, with `-per-core` and `-transient` as
+/// they apply, so runs of different kinds don't compare silently.
+fn workload_name(per_core: bool, pattern: surtr_stress::pattern::Pattern) -> String {
+    let mut name = "cpu".to_owned();
+    if per_core {
+        name.push_str("-per-core");
+    }
+    if pattern == surtr_stress::pattern::Pattern::Transient {
+        name.push_str("-transient");
+    }
+    name
 }
 
 /// One stretch of a run: these CPUs, this long. A normal run is one
@@ -304,7 +319,7 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
             let record = Record {
                 schema: record::SCHEMA,
                 id: new_id(&dir, "cpu"),
-                workload: if per_core { "cpu-per-core" } else { "cpu" }.to_owned(),
+                workload: workload_name(per_core, opts.pattern),
                 state: State::Running,
                 started: iso_utc(Timestamp::now()),
                 ended: None,
@@ -333,7 +348,9 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
     let view_done = Arc::new(AtomicBool::new(false));
     let view = if opts.animate {
         let state = Arc::new(Mutex::new(Live {
-            workload: if per_core { "per-core" } else { "cpu" }.to_owned(),
+            workload: workload_name(per_core, opts.pattern)
+                .trim_start_matches("cpu-")
+                .replace('-', " "),
             planned_ms: ms(total),
             limit: watched
                 .iter()
@@ -422,6 +439,8 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
             &cpu_text(&seg.cpus),
             "--duration-ms",
             &seg.duration.as_millis().to_string(),
+            "--pattern",
+            opts.pattern.name(),
         ]);
         // Each segment's thread i is the run's CPU at this position.
         let pos: Vec<usize> = seg.cpus.iter().map(|&c| position(c)).collect();
