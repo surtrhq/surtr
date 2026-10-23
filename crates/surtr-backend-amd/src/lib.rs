@@ -20,7 +20,8 @@ use std::{
 use surtr_backend::{Provider, ProviderError};
 use surtr_model::{
     Capabilities, Feature, GpuInfo, GpuProcess, GpuProcessKind, GpuVendor, SensorDescriptor,
-    SensorId, SensorKind, SensorReading, Source, Support, SystemInfo, Timestamp, Unit,
+    SensorId, SensorKind, SensorReading, Source, Support, SystemInfo, ThrottleReason,
+    ThrottleState, Timestamp, Unit,
 };
 
 const AMD_VENDOR: &str = "0x1002";
@@ -105,6 +106,51 @@ pub fn parse_fdinfo(text: &str) -> Option<FdInfo> {
     })
 }
 
+/// The ASIC-independent throttle status from a `gpu_metrics` table, as the
+/// kernel's `SMU_THROTTLER_*_BIT` mask.
+///
+/// Only tables v1.3 (dGPUs) and v2.2 to v2.4 (APUs) carry the field; for
+/// those its offset is fixed by `kgd_pp_interface.h`. The kernel fills tables
+/// with `0xFF` before the ASIC code writes them, so all ones means this GPU
+/// doesn't report it.
+pub fn indep_throttle_status(table: &[u8]) -> Option<u64> {
+    let size = usize::from(u16::from_ne_bytes([*table.first()?, *table.get(1)?]));
+    let offset = match (*table.get(2)?, *table.get(3)?) {
+        (1, 3) => 112,
+        (2, 2..=4) => 120,
+        _ => return None,
+    };
+    if size < offset + 8 {
+        return None;
+    }
+    let bits = u64::from_ne_bytes(table.get(offset..offset + 8)?.try_into().ok()?);
+    (bits != u64::MAX).then_some(bits)
+}
+
+/// Decodes the kernel's ASIC-independent throttler bits
+/// (`SMU_THROTTLER_*_BIT` in `amdgpu_smu.h`).
+pub fn decode_throttle(bits: u64) -> Vec<ThrottleReason> {
+    let mut reasons: Vec<ThrottleReason> = Vec::new();
+    for bit in (0..64).filter(|b| bits & (1 << b) != 0) {
+        let reason = match bit {
+            // PPT0-3, SPL, FPPT, SPPT, SPPT_APU.
+            0..=7 => ThrottleReason::PowerCap,
+            // TDC (GFX, SOC, MEM, VDD, CVIP) and EDC (CPU, GFX).
+            16..=22 => ThrottleReason::CurrentLimit,
+            // GPU, core, memory, edge, hotspot, SoC, VR and liquid temperatures.
+            32..=43 => ThrottleReason::SoftwareThermal,
+            // VRHOT and PROCHOT signals.
+            44..=47 => ThrottleReason::HardwareThermal,
+            // APCC, PPM, FIT and bits newer than this list.
+            _ => ThrottleReason::Other,
+        };
+        if !reasons.contains(&reason) {
+            reasons.push(reason);
+        }
+    }
+    reasons
+}
+
 fn label(text: &str) -> String {
     match text {
         "edge" => "Temperature (edge)".to_owned(),
@@ -119,6 +165,10 @@ fn label(text: &str) -> String {
     }
 }
 
+fn throttle_bits(dir: &Path) -> Option<u64> {
+    indep_throttle_status(&fs::read(dir.join("gpu_metrics")).ok()?)
+}
+
 /// One AMD GPU and the sensor files that answered when it was found.
 #[derive(Debug)]
 struct Card {
@@ -126,6 +176,8 @@ struct Card {
     dir: PathBuf,
     pci_slot: Option<String>,
     sensors: Vec<(SensorDescriptor, PathBuf, f64)>,
+    /// Its `gpu_metrics` table reports the throttle status.
+    throttle: bool,
 }
 
 impl Card {
@@ -254,11 +306,13 @@ impl Card {
             u.lines()
                 .find_map(|l| l.strip_prefix("PCI_SLOT_NAME=").map(str::to_owned))
         });
+        let throttle = throttle_bits(&dir).is_some();
         Self {
             device,
             dir,
             pci_slot,
             sensors,
+            throttle,
         }
     }
 }
@@ -350,12 +404,17 @@ impl Provider for AmdProvider {
         caps.set(Feature::GpuIdentity, Support::Available);
         caps.set(Feature::GpuSensors, Support::Available);
         caps.set(Feature::GpuProcesses, Support::Available);
-        caps.set(
-            Feature::GpuThrottleReasons,
-            Support::Unsupported {
-                reason: "not available through amdgpu sysfs yet".to_owned(),
-            },
-        );
+        if self.cards.iter().any(|c| c.throttle) {
+            caps.set(Feature::GpuThrottleReasons, Support::Available);
+        } else {
+            caps.set(
+                Feature::GpuThrottleReasons,
+                Support::Unsupported {
+                    reason: "this GPU's gpu_metrics table has no ASIC-independent throttle status"
+                        .to_owned(),
+                },
+            );
+        }
         caps
     }
 
@@ -464,6 +523,22 @@ impl Provider for AmdProvider {
             })
             .collect())
     }
+
+    fn throttle_reasons(&self) -> Result<Vec<ThrottleState>, ProviderError> {
+        let source = Source::new(Self::ID, "gpu_metrics");
+        Ok(self
+            .cards
+            .iter()
+            .filter(|c| c.throttle)
+            .filter_map(|c| {
+                Some(ThrottleState {
+                    device: c.device.clone(),
+                    reasons: decode_throttle(throttle_bits(&c.dir)?),
+                    source: source.clone(),
+                })
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -505,6 +580,151 @@ mod tests {
         assert_eq!(parse_fdinfo("pos:\t0\nflags:\t0\n"), None);
     }
 
+    /// `struct gpu_metrics_v1_3` from `kgd_pp_interface.h`, field by field.
+    #[repr(C)]
+    #[allow(dead_code)]
+    struct GpuMetricsV1_3 {
+        structure_size: u16,
+        format_revision: u8,
+        content_revision: u8,
+        temperatures: [u16; 6],
+        activities: [u16; 3],
+        average_socket_power: u16,
+        energy_accumulator: u64,
+        system_clock_counter: u64,
+        average_clocks: [u16; 7],
+        current_clocks: [u16; 7],
+        throttle_status: u32,
+        current_fan_speed: u16,
+        pcie_link_width: u16,
+        pcie_link_speed: u16,
+        padding: u16,
+        gfx_activity_acc: u32,
+        mem_activity_acc: u32,
+        temperature_hbm: [u16; 4],
+        firmware_timestamp: u64,
+        voltages: [u16; 3],
+        padding1: u16,
+        indep_throttle_status: u64,
+    }
+
+    /// `struct gpu_metrics_v2_2`; v2.3 and v2.4 only append fields to it.
+    #[repr(C)]
+    #[allow(dead_code)]
+    struct GpuMetricsV2_2 {
+        structure_size: u16,
+        format_revision: u8,
+        content_revision: u8,
+        temperature_gfx: u16,
+        temperature_soc: u16,
+        temperature_core: [u16; 8],
+        temperature_l3: [u16; 2],
+        average_gfx_activity: u16,
+        average_mm_activity: u16,
+        system_clock_counter: u64,
+        powers: [u16; 4],
+        average_core_power: [u16; 8],
+        average_clocks: [u16; 6],
+        current_clocks: [u16; 6],
+        current_coreclk: [u16; 8],
+        current_l3clk: [u16; 2],
+        throttle_status: u32,
+        fan_pwm: u16,
+        padding: [u16; 3],
+        indep_throttle_status: u64,
+    }
+
+    #[test]
+    fn metrics_offsets_match_the_kernel_structs() {
+        assert_eq!(
+            std::mem::offset_of!(GpuMetricsV1_3, indep_throttle_status),
+            112
+        );
+        assert_eq!(std::mem::size_of::<GpuMetricsV1_3>(), 120);
+        assert_eq!(
+            std::mem::offset_of!(GpuMetricsV2_2, indep_throttle_status),
+            120
+        );
+        assert_eq!(std::mem::size_of::<GpuMetricsV2_2>(), 128);
+    }
+
+    /// A `gpu_metrics` table as the kernel builds it: all `0xFF`, then the
+    /// header, then the fields the ASIC fills.
+    fn metrics_table(frev: u8, crev: u8, size: u16, indep: Option<(usize, u64)>) -> Vec<u8> {
+        let mut t = vec![0xFF; usize::from(size)];
+        t[..2].copy_from_slice(&size.to_ne_bytes());
+        t[2] = frev;
+        t[3] = crev;
+        if let Some((offset, bits)) = indep {
+            t[offset..offset + 8].copy_from_slice(&bits.to_ne_bytes());
+        }
+        t
+    }
+
+    #[test]
+    fn indep_throttle_status_by_table_version() {
+        let bits = 1 << 0 | 1 << 36;
+        assert_eq!(
+            indep_throttle_status(&metrics_table(1, 3, 120, Some((112, bits)))),
+            Some(bits)
+        );
+        for crev in 2..=4 {
+            let size = [128, 152, 168][usize::from(crev - 2)];
+            assert_eq!(
+                indep_throttle_status(&metrics_table(2, crev, size, Some((120, bits)))),
+                Some(bits)
+            );
+        }
+        // Running unrestricted.
+        assert_eq!(
+            indep_throttle_status(&metrics_table(1, 3, 120, Some((112, 0)))),
+            Some(0)
+        );
+        // An ASIC that leaves the field as initialized (cyan_skillfish, v2.2).
+        assert_eq!(indep_throttle_status(&metrics_table(2, 2, 128, None)), None);
+        // Tables without the field: v1.0-1.2, v1.4 and later, v2.0-2.1, v3.0.
+        for (frev, crev) in [(1, 2), (1, 4), (1, 8), (2, 1), (3, 0)] {
+            assert_eq!(
+                indep_throttle_status(&metrics_table(frev, crev, 128, Some((112, 0)))),
+                None
+            );
+        }
+        // Truncated tables.
+        assert_eq!(indep_throttle_status(&metrics_table(1, 3, 112, None)), None);
+        let mut short = metrics_table(1, 3, 120, Some((112, 0)));
+        short.truncate(116);
+        assert_eq!(indep_throttle_status(&short), None);
+        assert_eq!(indep_throttle_status(&[]), None);
+    }
+
+    #[test]
+    fn throttle_bits_decode() {
+        assert!(decode_throttle(0).is_empty());
+        // PPT0 and SPPT_APU are both the power limit, listed once.
+        assert_eq!(decode_throttle(1 << 0 | 1 << 7), [ThrottleReason::PowerCap]);
+        assert_eq!(
+            decode_throttle(1 << 16 | 1 << 22),
+            [ThrottleReason::CurrentLimit]
+        );
+        assert_eq!(decode_throttle(1 << 36), [ThrottleReason::SoftwareThermal]);
+        assert_eq!(
+            decode_throttle(1 << 44 | 1 << 47),
+            [ThrottleReason::HardwareThermal]
+        );
+        // APCC, PPM, FIT and unknown bits are limits, just unclassified.
+        for bit in [23, 56, 57, 63] {
+            assert_eq!(decode_throttle(1 << bit), [ThrottleReason::Other]);
+        }
+        assert_eq!(
+            decode_throttle(1 << 2 | 1 << 33 | 1 << 18),
+            [
+                ThrottleReason::PowerCap,
+                ThrottleReason::CurrentLimit,
+                ThrottleReason::SoftwareThermal
+            ]
+        );
+    }
+
     /// A fake /sys + /proc tree under the temp dir.
     struct Fixture(PathBuf);
 
@@ -516,7 +736,7 @@ mod tests {
             Self(root)
         }
 
-        fn file(&self, path: &str, content: &str) {
+        fn file(&self, path: &str, content: impl AsRef<[u8]>) {
             let path = self.0.join(path);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, content).unwrap();
@@ -654,6 +874,52 @@ mod tests {
             procs[0].used_memory_bytes.as_ref().unwrap().value,
             512 << 20
         );
+    }
+
+    #[test]
+    fn throttle_reasons_from_gpu_metrics() {
+        let fx = fixture("throttle");
+        let metrics = "sys/class/drm/card1/device/gpu_metrics";
+
+        // No gpu_metrics file: unsupported, and no state rather than "none".
+        let p = provider(&fx);
+        assert!(matches!(
+            p.capabilities().support(Feature::GpuThrottleReasons),
+            Some(Support::Unsupported { .. })
+        ));
+        assert!(p.throttle_reasons().unwrap().is_empty());
+
+        // A table the ASIC doesn't fill in: still unsupported.
+        fx.file(metrics, metrics_table(2, 2, 128, None));
+        let p = provider(&fx);
+        assert!(matches!(
+            p.capabilities().support(Feature::GpuThrottleReasons),
+            Some(Support::Unsupported { .. })
+        ));
+        assert!(p.throttle_reasons().unwrap().is_empty());
+
+        // An RDNA dGPU at its power limit and hotspot limit.
+        fx.file(
+            metrics,
+            metrics_table(1, 3, 120, Some((112, 1 << 0 | 1 << 36))),
+        );
+        let p = provider(&fx);
+        assert_eq!(
+            p.capabilities().support(Feature::GpuThrottleReasons),
+            Some(&Support::Available)
+        );
+        let states = p.throttle_reasons().unwrap();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].device, "amd0");
+        assert_eq!(states[0].source.method, "gpu_metrics");
+        assert_eq!(
+            states[0].reasons,
+            [ThrottleReason::PowerCap, ThrottleReason::SoftwareThermal]
+        );
+
+        // Read on every call, not cached at discovery.
+        fx.file(metrics, metrics_table(1, 3, 120, Some((112, 0))));
+        assert!(p.throttle_reasons().unwrap()[0].reasons.is_empty());
     }
 
     #[test]

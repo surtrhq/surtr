@@ -67,9 +67,11 @@ epoch). Rate sensors such as CPU load need two samples; the command waits
 |---|---|
 | `idle` | Nothing is running; low clocks are expected |
 | `power_cap` | The power limit is reached: the GPU is power-bound, not overheating |
+| `current_limit` | A current limit (TDC or EDC) is reached: a load limit like `power_cap`, not heat |
 | `software_thermal`, `hardware_thermal` | Temperature limits are slowing it: check cooling and airflow |
 | `hardware_slowdown`, `hardware_power_brake` | Hardware protection (thermal or power emergency, external brake): worth investigating |
 | `application_clocks`, `display_clocks`, `sync_boost` | Clocks held by a setting, the display or other GPUs |
+| `other` | The GPU reports a limit Surtr doesn't classify |
 
 An empty list while the GPU is busy means it is running at its potential.
 

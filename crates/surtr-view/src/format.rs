@@ -165,11 +165,12 @@ pub fn throttle(reason: ThrottleReason) -> &'static str {
         ThrottleReason::PowerCap => "power limit",
         ThrottleReason::HardwareSlowdown => "hardware slowdown",
         ThrottleReason::SyncBoost => "sync boost",
-        ThrottleReason::SoftwareThermal => "thermal limit (driver)",
+        ThrottleReason::SoftwareThermal => "thermal limit (driver or firmware)",
         ThrottleReason::HardwareThermal => "thermal limit (hardware)",
         ThrottleReason::HardwarePowerBrake => "power brake",
         ThrottleReason::DisplayClocks => "display clock setting",
-        _ => "other",
+        ThrottleReason::CurrentLimit => "current limit",
+        _ => "other limit",
     }
 }
 

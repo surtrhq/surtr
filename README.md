@@ -26,7 +26,7 @@ hardware reports are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 | [`surtr-backend`](crates/surtr-backend) | The `Provider` trait every hardware backend implements, plus a deterministic mock provider (feature `mock`). |
 | [`surtr-backend-native`](crates/surtr-backend-native) | Driverless OS backends (Windows, Linux, macOS): OS, CPU and memory information; CPU load, clocks and memory use on Windows and Linux, plus `hwmon` sensors on Linux. |
 | [`surtr-backend-nvidia`](crates/surtr-backend-nvidia) | NVIDIA GPUs through NVML, loaded at run time from the driver install (never shipped; see its NOTICE): identity, sensors, throttle reasons, per-process memory. |
-| [`surtr-backend-amd`](crates/surtr-backend-amd) | AMD GPUs on Linux through the `amdgpu` sysfs files: identity (named from `pci.ids`), sensors, per-process memory from DRM `fdinfo`. |
+| [`surtr-backend-amd`](crates/surtr-backend-amd) | AMD GPUs on Linux through the `amdgpu` sysfs files: identity (named from `pci.ids`), sensors, throttle reasons from `gpu_metrics` where its table reports them, per-process memory from DRM `fdinfo`. |
 | [`surtr-core`](crates/surtr-core) | The `Hub`, which combines the OS backend and GPU backends into one view (and logs provider failures); per-user paths, home-directory redaction and the settings file (`config.toml`). |
 | [`surtr-api`](crates/surtr-api) | `surtr serve --api`: a read-only REST and WebSocket API on loopback, behind a bearer token; see [docs/api.md](docs/api.md). Also the JSON answers it shares with the MCP server. |
 | [`surtr-mcp`](crates/surtr-mcp) | `surtr mcp`: a read-only MCP server so AI agents can ask about this machine's hardware; see [docs/mcp.md](docs/mcp.md). |
