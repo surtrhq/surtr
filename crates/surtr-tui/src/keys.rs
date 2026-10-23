@@ -1,15 +1,22 @@
-//! Arrow keys whose escape sequence arrived in pieces. Over SSH the bytes of
-//! an arrow key (`ESC [ A`) can be split across packets; crossterm then
-//! reports a lone Esc followed by the characters `[` and `A`. Seen on a
-//! remote session, where it used to quit the TUI.
+//! Escape sequences that arrived in pieces. Over SSH the bytes of a key or
+//! mouse sequence (`ESC [ A`, `ESC [ < 64;10;5 M`) can be split across
+//! packets; crossterm then reports a lone Esc followed by the rest as
+//! ordinary characters, which used to quit the TUI or switch tabs (the
+//! digits) while moving the mouse. After a lone Esc we collect the rest of
+//! the sequence and decode it; a complete sequence we don't know is
+//! dropped, never typed into the app.
 
 use std::{io, time::Duration};
 
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 
-/// How long to wait for the rest of a split sequence. A real Esc press has
-/// nothing following it within this time.
+/// How long to wait for each further byte of a split sequence. A real Esc
+/// press has nothing following it within this time.
 pub const WAIT: Duration = Duration::from_millis(50);
+/// Longest CSI sequence we collect before giving up.
+const MAX_LEN: usize = 32;
 
 fn key(e: &Event) -> Option<&KeyEvent> {
     match e {
@@ -18,7 +25,18 @@ fn key(e: &Event) -> Option<&KeyEvent> {
     }
 }
 
-/// The key a CSI or SS3 sequence's final character stands for.
+fn char_of(e: &Event) -> Option<char> {
+    match key(e)?.code {
+        KeyCode::Char(c) => Some(c),
+        _ => None,
+    }
+}
+
+fn press(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+/// The key a final character (CSI or SS3) stands for.
 fn final_key(c: char) -> Option<KeyCode> {
     Some(match c {
         'A' => KeyCode::Up,
@@ -31,10 +49,55 @@ fn final_key(c: char) -> Option<KeyCode> {
     })
 }
 
+/// Decodes the body of a CSI sequence (after `ESC [`, final character
+/// included): an SGR mouse event, an arrow or Home/End (modifiers ignored),
+/// or a `~` key. `None` for anything else.
+fn decode_csi(body: &str) -> Option<Event> {
+    let last = body.chars().last()?;
+    let params = &body[..body.len() - last.len_utf8()];
+    if let Some(mouse) = params.strip_prefix('<') {
+        let mut n = mouse.split(';').map(|p| p.parse::<u16>().ok());
+        let (b, x, y) = (n.next()??, n.next()??, n.next()??);
+        // Bits 2-4 are Shift, Alt and Ctrl; the rest is the button.
+        let kind = match (b & !0b0001_1100, last) {
+            (64, _) => MouseEventKind::ScrollUp,
+            (65, _) => MouseEventKind::ScrollDown,
+            (0, 'M') => MouseEventKind::Down(MouseButton::Left),
+            (1, 'M') => MouseEventKind::Down(MouseButton::Middle),
+            (2, 'M') => MouseEventKind::Down(MouseButton::Right),
+            (0, 'm') => MouseEventKind::Up(MouseButton::Left),
+            (1, 'm') => MouseEventKind::Up(MouseButton::Middle),
+            (2, 'm') => MouseEventKind::Up(MouseButton::Right),
+            _ => return None,
+        };
+        return Some(Event::Mouse(MouseEvent {
+            kind,
+            column: x.saturating_sub(1),
+            row: y.saturating_sub(1),
+            modifiers: KeyModifiers::NONE,
+        }));
+    }
+    if let Some(code) = final_key(last) {
+        return Some(press(code));
+    }
+    if last == '~' {
+        let code = match params.split(';').next()? {
+            "1" | "7" => KeyCode::Home,
+            "2" => KeyCode::Insert,
+            "3" => KeyCode::Delete,
+            "4" | "8" => KeyCode::End,
+            "5" => KeyCode::PageUp,
+            "6" => KeyCode::PageDown,
+            _ => return None,
+        };
+        return Some(press(code));
+    }
+    None
+}
+
 /// The events `first` really stands for. After a lone Esc it asks `next`
-/// (waiting at most [`WAIT`]) for what follows, and turns `[` or `O` plus a
-/// final character back into the arrow key; anything else is passed on as
-/// it came.
+/// (waiting at most [`WAIT`] each time) for what follows and rebuilds a
+/// split sequence; anything that isn't one is passed on as it came.
 pub fn reassemble(
     first: Event,
     mut next: impl FnMut(Duration) -> io::Result<Option<Event>>,
@@ -46,80 +109,113 @@ pub fn reassemble(
     let Some(second) = next(WAIT)? else {
         return Ok(vec![first]);
     };
-    let introducer = key(&second).is_some_and(|k| matches!(k.code, KeyCode::Char('[' | 'O')));
-    if !introducer {
-        return Ok(vec![first, second]);
+    match char_of(&second) {
+        // SS3: one final character.
+        Some('O') => {
+            let Some(third) = next(WAIT)? else {
+                return Ok(vec![first, second]);
+            };
+            Ok(match char_of(&third).and_then(final_key) {
+                Some(code) => vec![press(code)],
+                None => vec![first, second, third],
+            })
+        }
+        // CSI: parameters, then a final character in @..~ ('<' only opens
+        // an SGR mouse sequence).
+        Some('[') => {
+            let mut seen = vec![first, second];
+            let mut body = String::new();
+            while body.len() < MAX_LEN {
+                let Some(e) = next(WAIT)? else {
+                    // Cut off: pass on what we have.
+                    return Ok(seen);
+                };
+                let Some(c) = char_of(&e) else {
+                    seen.push(e);
+                    return Ok(seen);
+                };
+                seen.push(e);
+                body.push(c);
+                let opens_mouse = body.len() == 1 && c == '<';
+                if ('@'..='~').contains(&c) && !opens_mouse {
+                    // A complete sequence: decoded, or dropped.
+                    return Ok(decode_csi(&body).into_iter().collect());
+                }
+            }
+            Ok(Vec::new())
+        }
+        _ => Ok(vec![first, second]),
     }
-    let Some(third) = next(WAIT)? else {
-        return Ok(vec![first, second]);
-    };
-    let code = key(&third).and_then(|k| match k.code {
-        KeyCode::Char(c) => final_key(c),
-        _ => None,
-    });
-    Ok(match code {
-        Some(code) => vec![Event::Key(KeyEvent::new(code, KeyModifiers::NONE))],
-        None => vec![first, second, third],
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn press(code: KeyCode) -> Event {
-        Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
-    }
-
-    /// `reassemble` with the following events already waiting.
-    fn run(first: Event, rest: &[Event]) -> Vec<Event> {
-        let mut rest = rest.iter().cloned();
+    /// `reassemble` with these characters waiting after the first event.
+    fn run(first: Event, rest: &str) -> Vec<Event> {
+        let mut rest = rest.chars().map(|c| press(KeyCode::Char(c)));
         reassemble(first, |_| Ok(rest.next())).unwrap()
     }
 
+    fn esc() -> Event {
+        press(KeyCode::Esc)
+    }
+
     #[test]
-    fn split_arrow_keys_are_rebuilt() {
-        let esc = press(KeyCode::Esc);
-        for (c, code) in [
-            ('A', KeyCode::Up),
-            ('D', KeyCode::Left),
-            ('H', KeyCode::Home),
+    fn split_keys_are_rebuilt() {
+        for (rest, code) in [
+            ("[A", KeyCode::Up),
+            ("[D", KeyCode::Left),
+            ("OB", KeyCode::Down),
+            ("[H", KeyCode::Home),
+            ("[1;5C", KeyCode::Right),
+            ("[5~", KeyCode::PageUp),
+            ("[6~", KeyCode::PageDown),
         ] {
-            assert_eq!(
-                run(
-                    esc.clone(),
-                    &[press(KeyCode::Char('[')), press(KeyCode::Char(c))]
-                ),
-                [press(code)]
-            );
+            assert_eq!(run(esc(), rest), [press(code)], "{rest}");
         }
-        // SS3 form, as some terminals send in application mode.
+    }
+
+    #[test]
+    fn split_mouse_events_are_rebuilt_not_typed() {
+        let wheel = run(esc(), "[<65;12;7M");
         assert_eq!(
-            run(esc, &[press(KeyCode::Char('O')), press(KeyCode::Char('B'))]),
-            [press(KeyCode::Down)]
+            wheel,
+            [Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 11,
+                row: 6,
+                modifiers: KeyModifiers::NONE,
+            })]
         );
+        let click = run(esc(), "[<0;3;1M");
+        assert!(matches!(
+            click[..],
+            [Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                row: 0,
+                ..
+            })]
+        ));
+        // Motion and other unknown sequences are dropped, not typed: no
+        // digits reach the app to switch tabs.
+        assert!(run(esc(), "[<35;40;12M").is_empty());
+        assert!(run(esc(), "[?1;2c").is_empty());
     }
 
     #[test]
     fn real_keys_pass_through() {
-        let esc = press(KeyCode::Esc);
         // A real Esc: nothing follows.
-        assert_eq!(run(esc.clone(), &[]), std::slice::from_ref(&esc));
+        assert_eq!(run(esc(), ""), [esc()]);
         // Esc, then an unrelated key.
-        let q = press(KeyCode::Char('q'));
-        assert_eq!(run(esc.clone(), std::slice::from_ref(&q)), [esc.clone(), q]);
-        // Esc and '[' with no final character, or a different one.
-        let bracket = press(KeyCode::Char('['));
+        assert_eq!(run(esc(), "q"), [esc(), press(KeyCode::Char('q'))]);
+        // A sequence cut off is passed on as it came.
         assert_eq!(
-            run(esc.clone(), std::slice::from_ref(&bracket)),
-            [esc.clone(), bracket.clone()]
-        );
-        let x = press(KeyCode::Char('x'));
-        assert_eq!(
-            run(esc.clone(), &[bracket.clone(), x.clone()]),
-            [esc, bracket, x]
+            run(esc(), "[1"),
+            [esc(), press(KeyCode::Char('[')), press(KeyCode::Char('1'))]
         );
         // Anything that isn't a lone Esc is left alone.
-        assert_eq!(run(press(KeyCode::Up), &[]), [press(KeyCode::Up)]);
+        assert_eq!(run(press(KeyCode::Up), ""), [press(KeyCode::Up)]);
     }
 }

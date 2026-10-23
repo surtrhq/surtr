@@ -28,6 +28,25 @@ pub use app::{App, Tab};
 pub use colors::{Depth, Palette};
 pub use ui::draw;
 
+/// Mouse reports for clicks and the wheel only (modes 1000 and 1006). The
+/// usual capture also reports every movement, a flood of escape sequences
+/// that over SSH can arrive split and be misread as keys; the TUI doesn't
+/// use movement.
+#[cfg(unix)]
+fn mouse_on() -> io::Result<()> {
+    use std::io::Write as _;
+    let mut out = io::stdout();
+    out.write_all(b"\x1b[?1000h\x1b[?1006h")?;
+    out.flush()
+}
+
+/// On Windows crossterm reads the mouse through the console API: no escape
+/// sequences to split.
+#[cfg(not(unix))]
+fn mouse_on() -> io::Result<()> {
+    execute!(io::stdout(), EnableMouseCapture)
+}
+
 /// Runs the TUI on the current terminal until the user quits, refreshing
 /// every `interval`. `name` resolves process ids to names.
 pub fn run(
@@ -45,7 +64,7 @@ pub fn run(
     let mut app = App::new(hub);
     // ratatui::init also restores the terminal if Surtr panics.
     let mut terminal = ratatui::init();
-    execute!(io::stdout(), EnableMouseCapture)?;
+    mouse_on()?;
     let result = (|| -> io::Result<()> {
         let mut next = Instant::now();
         while !app.quit {
