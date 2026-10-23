@@ -855,9 +855,13 @@ fn mcp_answers_read_tools() {
         .map(|l| serde_json::from_str(l).unwrap())
         .collect();
     assert_eq!(entries.len(), 4, "{audit}");
-    assert_eq!(entries[0]["tool"], "get_sensors");
-    assert_eq!(entries[0]["client"], "surtr-test 0");
-    assert_eq!(entries[0]["arguments"]["kind"], "temperature");
+    // Calls run concurrently, so entries come in the order they finished.
+    let sensors = entries
+        .iter()
+        .find(|e| e["tool"] == "get_sensors")
+        .expect("get_sensors logged");
+    assert_eq!(sensors["client"], "surtr-test 0");
+    assert_eq!(sensors["arguments"]["kind"], "temperature");
     assert!(entries.iter().all(|e| e["outcome"] == "ok"));
     let _ = std::fs::remove_dir_all(&dir);
 }

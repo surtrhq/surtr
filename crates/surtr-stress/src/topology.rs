@@ -44,7 +44,12 @@ fn group<K: PartialEq>(mut cpus: Vec<(u32, K, Option<u8>)>) -> Vec<LogicalCpu> {
 
 /// The logical CPUs this process may use, with their cores.
 pub fn topology() -> Vec<LogicalCpu> {
-    let allowed = crate::cpu::allowed_cpus();
+    let mut allowed = crate::cpu::allowed_cpus();
+    // Where the OS doesn't say (macOS), every logical CPU.
+    if allowed.is_empty() {
+        let n = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        allowed = (0..u32::try_from(n).unwrap_or(1)).collect();
+    }
     #[cfg(target_os = "linux")]
     {
         let read = |id: u32, file: &str| -> Option<i64> {
@@ -89,6 +94,7 @@ pub fn topology() -> Vec<LogicalCpu> {
     }
     #[cfg(not(any(target_os = "linux", windows)))]
     {
+        // Unknown topology: each logical CPU a core of its own.
         group(allowed.iter().map(|&id| (id, id, None)).collect())
     }
 }
@@ -263,10 +269,8 @@ mod tests {
     #[test]
     fn this_machine_has_a_topology() {
         let topo = topology();
-        if cfg!(any(target_os = "linux", windows)) {
-            assert!(!topo.is_empty());
-            let all = placement(&topo, None, true).unwrap();
-            assert_eq!(all.len(), topo.len(), "every CPU once");
-        }
+        assert!(!topo.is_empty());
+        let all = placement(&topo, None, true).unwrap();
+        assert_eq!(all.len(), topo.len(), "every CPU once");
     }
 }
