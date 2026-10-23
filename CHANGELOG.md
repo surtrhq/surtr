@@ -4,6 +4,14 @@ All notable changes to Surtr are listed here. Surtr follows
 [Semantic Versioning](https://semver.org/); before 1.0, minor versions may
 change commands and JSON output.
 
+## [Unreleased]
+
+### Added
+- `surtr stress cpu --per-core [--each 1m] [--siblings]`: one physical core
+  at a time, each in turn, with a result, peak clock, throughput and peak
+  temperature per core; finds the weak core in per-core tuning (Curve
+  Optimizer, per-core undervolts). Hybrid CPUs show P- and E-cores.
+
 ## [0.2.0] - 2026-10-23
 
 Stress testing arrives: a verified CPU stress test with host-enforced
