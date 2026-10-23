@@ -189,14 +189,24 @@ fn host_gone(dir: &Path, id: &str) -> bool {
     }
 }
 
-/// The record with `id`, or the latest when `id` is `latest`.
+/// The record with `id`; `latest` is the newest run and `previous` the one
+/// before it.
 pub fn find(dir: &Path, id: &str) -> io::Result<Option<Record>> {
     let (records, _) = load_all(dir)?;
-    Ok(if id == "latest" {
-        records.into_iter().last()
-    } else {
-        records.into_iter().find(|r| r.id == id)
-    })
+    Ok(pick(records, id))
+}
+
+/// The record called `id` (or `latest`, `previous`) among `records`,
+/// oldest first.
+pub fn pick(mut records: Vec<Record>, id: &str) -> Option<Record> {
+    match id {
+        "latest" => records.pop(),
+        "previous" => {
+            records.pop();
+            records.pop()
+        }
+        _ => records.into_iter().find(|r| r.id == id),
+    }
 }
 
 #[cfg(test)]

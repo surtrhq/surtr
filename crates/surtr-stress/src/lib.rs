@@ -10,6 +10,7 @@ use std::{io, io::Write, time::Duration};
 
 use serde::Serialize;
 
+pub mod compare;
 pub mod cpu;
 pub mod event;
 pub mod html;

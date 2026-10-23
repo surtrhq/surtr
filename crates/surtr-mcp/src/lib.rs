@@ -61,6 +61,15 @@ pub struct RunId {
     pub id: String,
 }
 
+/// Two runs to compare.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RunPair {
+    /// The baseline: a run id, `latest` or `previous` (default `previous`).
+    pub a: Option<String>,
+    /// The run to compare with it (default `latest`).
+    pub b: Option<String>,
+}
+
 /// A stress-test request.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct StressRequest {
@@ -373,6 +382,35 @@ impl Server {
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("no run {}", q.id))?;
             Ok(json!({ "run": run }))
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Compare two stress runs, for example before and after a tuning \
+                       change: result, throughput (total and per thread), peak and average \
+                       temperature, throughput sag (throttling) and errors, with the \
+                       change from a to b and warnings when the runs aren't comparable.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn compare_runs(
+        &self,
+        Parameters(q): Parameters<RunPair>,
+    ) -> Result<CallToolResult, String> {
+        let dir = self.runs_dir()?;
+        self.answer(move |_| {
+            let (records, _) = record::load_all(&dir).map_err(|e| e.to_string())?;
+            let a = q.a.unwrap_or_else(|| "previous".to_owned());
+            let b = q.b.unwrap_or_else(|| "latest".to_owned());
+            let ra = record::pick(records.clone(), &a).ok_or_else(|| format!("no run {a}"))?;
+            let rb = record::pick(records, &b).ok_or_else(|| format!("no run {b}"))?;
+            serde_json::to_value(surtr_stress::compare::compare(&ra, &rb))
+                .map_err(|e| e.to_string())
         })
         .await
     }

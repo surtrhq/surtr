@@ -380,6 +380,15 @@ enum RunsCommand {
         /// The request code the agent gave you.
         id: String,
     },
+    /// Compare two runs, for example before and after a tuning change.
+    Compare {
+        /// The baseline: a run id, `latest` or `previous` (default).
+        #[arg(default_value = "previous")]
+        a: String,
+        /// The run to compare with it (default: `latest`).
+        #[arg(default_value = "latest")]
+        b: String,
+    },
     /// Turn down an AI agent's request to run a stress test.
     Deny {
         /// The request code the agent gave you.

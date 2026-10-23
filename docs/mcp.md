@@ -87,7 +87,8 @@ claude mcp add --transport http surtr http://127.0.0.1:7878/mcp \
 | `get_diagnostics` | The redacted `surtr diag` summary as Markdown |
 | `list_stress_tests` | The built-in stress tests and whether agents may request runs |
 | `list_runs` | Recorded stress runs, newest first, with result and peak temperature |
-| `get_run` | One run in full (`id` or `latest`): limits, wrong answers, per-second timeline |
+| `get_run` | One run in full (`id`, `latest` or `previous`): limits, wrong answers, per-second timeline |
+| `compare_runs` | Two runs side by side (default: `previous` against `latest`): throughput, temperatures, throttling sag, errors, with warnings when they aren't comparable |
 
 Results are JSON (Markdown for `get_diagnostics`). Times are UTC ISO 8601.
 Each sensor value also comes formatted with its unit (`"text": "56.0 °C"`).

@@ -814,6 +814,7 @@ fn mcp_answers_read_tools() {
         "list_stress_tests",
         "list_runs",
         "get_run",
+        "compare_runs",
     ] {
         assert!(names.contains(&tool), "{tool} missing: {names:?}");
     }
@@ -1749,5 +1750,53 @@ fn stress_threads_go_where_asked() {
     ] {
         assert_ne!(run(args).status.code(), Some(0), "{args:?}");
     }
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[test]
+fn runs_compare_latest_with_previous() {
+    let data = data_dir("compare");
+    let surtr_in = |args: &[&str]| {
+        surtr_command()
+            .env("SURTR_DATA_DIR", &data)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    // Too few runs to compare yet.
+    assert_eq!(surtr_in(&["runs", "compare"]).status.code(), Some(1));
+    for _ in 0..2 {
+        let out = surtr_in(&[
+            "--mock",
+            "stress",
+            "cpu",
+            "--duration",
+            "2s",
+            "--threads",
+            "1",
+        ]);
+        assert_eq!(out.status.code(), Some(0));
+        // Run ids are per second; make the second one distinct.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+    }
+    let text = String::from_utf8(surtr_in(&["runs", "compare"]).stdout).unwrap();
+    for row in [
+        "Throughput",
+        "Peak temperature",
+        "Sag (throttling)",
+        "Errors",
+    ] {
+        assert!(text.contains(row), "{row} missing:\n{text}");
+    }
+    assert!(
+        text.contains("under 30 s"),
+        "short runs are flagged:\n{text}"
+    );
+
+    let out = surtr_in(&["--json", "runs", "compare", "previous", "latest"]);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(v["rate_change_pct"].as_f64().is_some(), "{v}");
+    assert_eq!(v["a"]["threads"], 1);
+    assert_ne!(v["a"]["id"], v["b"]["id"]);
     let _ = std::fs::remove_dir_all(&data);
 }

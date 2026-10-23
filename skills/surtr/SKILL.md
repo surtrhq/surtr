@@ -42,6 +42,7 @@ Everything below is read-only unless marked otherwise.
 | Watch values change for a while | `surtr watch --json --count 10 [filters]` (one JSON object per line) |
 | Record a short baseline | `surtr record --count 60` (one sample per second into the history database) |
 | Past stress runs and their results | `surtr runs --json`, then `surtr runs show <id> --json` |
+| Did a tuning change help? | `surtr runs compare <a> <b> --json` (defaults: previous against latest); check `warnings` before trusting the numbers |
 | Summary for a bug report | `surtr diag --summary` (Markdown; contains no serials or user names) |
 
 `--mock` runs any command against a built-in fake machine, useful for trying

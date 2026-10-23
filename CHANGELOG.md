@@ -17,6 +17,9 @@ change commands and JSON output.
   is the thread's throughput (throttling makes it drop), color is the
   temperature against the limit, a thread with a wrong answer turns to ash.
   `--plain`, `--json`, `NO_COLOR` or a non-terminal give a one-line status.
+- `surtr runs compare` and the MCP `compare_runs` tool: two runs side by
+  side (throughput, temperatures, throttling sag, errors), with warnings
+  when the runs aren't comparable.
 - Stress threads go one per physical core before any SMT sibling is used;
   `--cpus 0,2,5` picks exact CPUs and `--no-smt` keeps to one thread per
   core. Runs record their CPUs.
