@@ -894,7 +894,14 @@ fn run(
                 Some("light") => surtr_view::Theme::LIGHT,
                 _ => surtr_view::Theme::DARK,
             };
-            surtr_tui::run(hub, interval, theme, &process_name)?;
+            let ms = |text: &str| history::parse_duration_ms(text).map(Duration::from_millis);
+            let stress = surtr_tui::StressSetup {
+                worker: std::env::current_exe().map_err(|e| e.to_string())?,
+                runs_dir: stress::runs_dir(),
+                max_temp_c: f64::from(settings.stress.max_temp_c.unwrap_or(95)),
+                max_duration: ms(settings.stress.max_duration.as_deref().unwrap_or("30m"))?,
+            };
+            surtr_tui::run(hub, interval, theme, &process_name, Some(stress))?;
             Ok(String::new())
         }
         Command::Stress {

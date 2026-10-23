@@ -38,6 +38,11 @@ impl Palette {
         Self { theme, depth }
     }
 
+    /// The color depth it draws with.
+    pub fn depth(&self) -> Depth {
+        self.depth
+    }
+
     /// The color of `role`.
     pub fn color(&self, role: Role) -> Color {
         let c = self.theme.color(role);

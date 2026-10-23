@@ -15,6 +15,8 @@ use surtr_view::{Level, Role, capability_rows, format, sensor_sections, system_s
 use crate::{
     app::{App, HISTORY, Tab},
     colors::Palette,
+    fire,
+    stress::Phase,
 };
 
 const BRAND: &str = " SURTR ";
@@ -53,6 +55,7 @@ pub fn draw(f: &mut Frame, app: &App, p: &Palette) {
         Tab::Sensors => draw_sensors(f, body, app, p),
         Tab::Gpu => draw_gpus(f, body, app, p),
         Tab::Capabilities => draw_capabilities(f, body, app, p),
+        Tab::Stress => draw_stress(f, body, app, p),
     }
     draw_footer(f, footer, app, p);
     if app.help {
@@ -117,7 +120,13 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
         Span::raw(" "),
     ];
     for (i, tab) in Tab::ALL.iter().enumerate() {
-        let text = format!(" {} {} ", i + 1, tab.title());
+        // A dot on the Stress tab while a test runs.
+        let dot = if *tab == Tab::Stress && app.stress.running() {
+            "●"
+        } else {
+            " "
+        };
+        let text = format!(" {} {}{dot}", i + 1, tab.title());
         let style = if *tab == app.tab {
             p.style(Role::Accent)
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
@@ -156,7 +165,15 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
         f.render_widget(prompt, area);
         return;
     }
-    let keys = " q quit  ←/→ tabs  1-4 views  ↑/↓ scroll  / filter  : commands  ? help";
+    let keys = match (app.tab, app.stress.phase) {
+        (Tab::Stress, Phase::Form) => {
+            " ↑/↓ choose  ←/→ change  Enter start  Tab views  q quit  ? help"
+        }
+        (Tab::Stress, Phase::Confirm) => " y start the test  n back",
+        (Tab::Stress, Phase::Running) => " s stop the test  Tab views  q stop and quit",
+        (Tab::Stress, Phase::Done) => " Enter new test  Tab views  q quit",
+        _ => " q quit  ←/→ tabs  1-5 views  ↑/↓ scroll  / filter  : commands  ? help",
+    };
     let providers = format!("{} ", app.providers.join(", "));
     let [left, right] = Layout::horizontal([
         Constraint::Min(0),
@@ -573,9 +590,154 @@ fn draw_capabilities(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
     f.render_widget(table, area);
 }
 
+fn draw_stress(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
+    let s = &app.stress;
+    if s.setup.is_none() {
+        let text = Paragraph::new(Line::styled(
+            " Stress tests aren't available here.",
+            p.style(Role::Missing),
+        ));
+        f.render_widget(text.block(block("Stress test", p)), area);
+        return;
+    }
+    match s.phase {
+        Phase::Form | Phase::Confirm => {
+            let mut lines = vec![Line::raw("")];
+            for (i, field) in s.fields().into_iter().enumerate() {
+                let (label, value) = s.row_text(field);
+                let selected = i == s.row && s.phase == Phase::Form;
+                let value = if selected {
+                    Span::styled(
+                        format!("‹ {value} ›"),
+                        p.style(Role::Accent).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::raw(format!("  {value}"))
+                };
+                let marker = if selected { " ▸ " } else { "   " };
+                lines.push(Line::from(vec![
+                    Span::styled(marker, p.style(Role::Accent)),
+                    Span::styled(format!("{label:<14}"), p.style(Role::Muted)),
+                    value,
+                ]));
+            }
+            lines.push(Line::raw(""));
+            match s.plan() {
+                Ok(plan) => {
+                    for l in plan {
+                        lines.push(Line::raw(format!("   {l}")));
+                    }
+                    lines.push(Line::raw(""));
+                    lines.push(Line::styled(
+                        "   Enter to start; you confirm first.",
+                        p.style(Role::Muted),
+                    ));
+                }
+                Err(why) => lines.push(Line::styled(format!("   {why}"), p.style(Role::Warn))),
+            }
+            f.render_widget(
+                Paragraph::new(lines)
+                    .wrap(Wrap { trim: false })
+                    .block(block("Stress test", p)),
+                area,
+            );
+            if s.phase == Phase::Confirm {
+                draw_confirm(f, area, app, p);
+            }
+        }
+        Phase::Running | Phase::Done => {
+            let [flames, below] =
+                Layout::vertical([Constraint::Length(fire::HEIGHT), Constraint::Min(0)])
+                    .areas(area);
+            if let Some(live) = s.live() {
+                fire::render(
+                    f.buffer_mut(),
+                    flames,
+                    &live,
+                    &mut s.fire.borrow_mut(),
+                    p.depth(),
+                );
+            }
+            let shared = s
+                .shared
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut lines: Vec<Line> = shared
+                .notes
+                .iter()
+                .map(|n| Line::styled(format!(" {n}"), p.style(Role::Muted)))
+                .collect();
+            match &shared.result {
+                None => {}
+                Some(Ok(done)) => {
+                    let role = match done.report.outcome {
+                        surtr_stress::runner::Outcome::Passed => Role::Ok,
+                        surtr_stress::runner::Outcome::ErrorsFound
+                        | surtr_stress::runner::Outcome::WorkerFailed { .. } => Role::Critical,
+                        _ => Role::Warn,
+                    };
+                    let text = surtr_stress::host::describe(&done.report);
+                    for (i, l) in text.lines().enumerate() {
+                        let style = if i == 0 {
+                            p.style(role).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::new()
+                        };
+                        lines.push(Line::styled(format!(" {l}"), style));
+                    }
+                    if let Some(id) = &done.id {
+                        lines.push(Line::styled(
+                            format!(
+                                " Saved as run {id}; `surtr runs report {id}` writes an HTML report."
+                            ),
+                            p.style(Role::Muted),
+                        ));
+                    }
+                }
+                Some(Err(why)) => {
+                    lines.push(Line::styled(
+                        format!(" Couldn't run: {why}"),
+                        p.style(Role::Critical),
+                    ));
+                }
+            }
+            f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), below);
+        }
+    }
+}
+
+fn draw_confirm(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
+    let mut lines = vec![Line::raw("")];
+    for l in app.stress.plan().unwrap_or_default() {
+        lines.push(Line::raw(l));
+    }
+    lines.extend([
+        Line::raw(""),
+        Line::raw(
+            "It heats the machine and slows everything else down; on an unstable machine \
+             it can crash it and lose unsaved work. You can stop it with s.",
+        ),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("y", p.style(Role::Accent).add_modifier(Modifier::BOLD)),
+            Span::raw(" start   "),
+            Span::styled("n", p.style(Role::Accent).add_modifier(Modifier::BOLD)),
+            Span::raw(" back"),
+        ]),
+    ]);
+    let popup = centered(area, 64, 12);
+    f.render_widget(Clear, popup);
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(block("Start the stress test?", p).padding(Padding::horizontal(1))),
+        popup,
+    );
+}
+
 fn draw_help(f: &mut Frame, area: Rect, p: &Palette) {
     let keys = [
-        ("1-4", "switch view"),
+        ("1-5", "switch view"),
         ("←/→, Tab", "next or previous view"),
         ("↑/↓, j/k", "scroll"),
         ("PgUp/PgDn", "scroll by a page"),
@@ -583,6 +745,7 @@ fn draw_help(f: &mut Frame, area: Rect, p: &Palette) {
         ("mouse", "click a tab, wheel to scroll"),
         (": or Ctrl+P", "command palette"),
         ("/", "filter sensors"),
+        ("s", "stop a running stress test"),
         ("?", "this help"),
         ("q, Ctrl+C", "quit"),
     ];

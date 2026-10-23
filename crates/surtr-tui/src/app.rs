@@ -10,6 +10,8 @@ use surtr_core::{Hub, Sample};
 use surtr_model::{Capabilities, GpuProcess, SystemInfo, ThrottleState};
 use surtr_view::Status;
 
+use crate::stress::Stress;
+
 /// How many samples each trend keeps (two minutes at the default 1 s).
 pub const HISTORY: usize = 120;
 
@@ -24,11 +26,19 @@ pub enum Tab {
     Gpu,
     /// What works on this machine.
     Capabilities,
+    /// The built-in stress test.
+    Stress,
 }
 
 impl Tab {
     /// All tabs in order.
-    pub const ALL: [Tab; 4] = [Tab::Overview, Tab::Sensors, Tab::Gpu, Tab::Capabilities];
+    pub const ALL: [Tab; 5] = [
+        Tab::Overview,
+        Tab::Sensors,
+        Tab::Gpu,
+        Tab::Capabilities,
+        Tab::Stress,
+    ];
 
     /// Tab title.
     pub fn title(self) -> &'static str {
@@ -37,6 +47,7 @@ impl Tab {
             Tab::Sensors => "Sensors",
             Tab::Gpu => "GPU",
             Tab::Capabilities => "Capabilities",
+            Tab::Stress => "Stress",
         }
     }
 
@@ -62,11 +73,12 @@ pub enum Action {
 
 impl Action {
     /// Every palette entry, in display order.
-    pub const ALL: [(&'static str, Action); 8] = [
+    pub const ALL: [(&'static str, Action); 9] = [
         ("Go to Overview", Action::Go(Tab::Overview)),
         ("Go to Sensors", Action::Go(Tab::Sensors)),
         ("Go to GPU", Action::Go(Tab::Gpu)),
         ("Go to Capabilities", Action::Go(Tab::Capabilities)),
+        ("Go to Stress", Action::Go(Tab::Stress)),
         ("Filter sensors…", Action::FilterSensors),
         ("Clear sensor filter", Action::ClearFilter),
         ("Show keys", Action::Help),
@@ -116,6 +128,8 @@ pub struct App {
     pub filtering: bool,
     /// Latest GPU processes.
     pub processes: Vec<GpuProcess>,
+    /// The Stress tab.
+    pub stress: Stress,
 }
 
 fn key(s: &Sample) -> (String, String) {
@@ -133,6 +147,12 @@ impl App {
         let capabilities = hub.capabilities();
         let samples = hub.read();
         let status = surtr_view::status(&system, &samples, &[], &capabilities);
+        // Without a setup from the command line the tab only explains.
+        let stress = Stress::new(
+            None,
+            surtr_stress::topology::topology(),
+            surtr_stress::runner::watched(&hub.sensors(), 95.0),
+        );
         Self {
             tab: Tab::Overview,
             scroll: 0,
@@ -149,6 +169,24 @@ impl App {
             palette: None,
             filter: String::new(),
             filtering: false,
+            stress,
+        }
+    }
+
+    /// Picks up a stress run that ended; call it every loop.
+    pub fn tick(&mut self) {
+        if self.stress.poll() {
+            self.quit = true;
+        }
+    }
+
+    /// Quits, stopping a running test first.
+    fn request_quit(&mut self) {
+        if self.stress.running() {
+            self.stress.quit_after = true;
+            self.stress.stop_run();
+        } else {
+            self.quit = true;
         }
     }
 
@@ -232,7 +270,7 @@ impl App {
             }
             Action::ClearFilter => self.filter.clear(),
             Action::Help => self.help = true,
-            Action::Quit => self.quit = true,
+            Action::Quit => self.request_quit(),
         }
     }
 
@@ -309,9 +347,13 @@ impl App {
                 return;
             }
         }
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        if self.tab == Tab::Stress && !ctrl && self.stress.key(k) {
+            return;
+        }
         match k.code {
-            KeyCode::Char('q') => self.quit = true,
-            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
+            KeyCode::Char('q') => self.request_quit(),
+            KeyCode::Char('c') if ctrl => self.request_quit(),
             // Esc doesn't quit: over SSH a split arrow key can look like one.
             KeyCode::Char('?') | KeyCode::F(1) => self.help = true,
             KeyCode::Char(':') => self.palette = Some(CommandPalette::default()),
@@ -321,7 +363,7 @@ impl App {
             KeyCode::Char('/') => self.run(Action::FilterSensors),
             KeyCode::Tab | KeyCode::Right => self.step_tab(true),
             KeyCode::BackTab | KeyCode::Left => self.step_tab(false),
-            KeyCode::Char(c @ '1'..='4') => {
+            KeyCode::Char(c @ '1'..='5') => {
                 self.select(Tab::ALL[usize::from(c as u8 - b'1')]);
             }
             KeyCode::Down | KeyCode::Char('j') => self.scroll += 1,

@@ -2,7 +2,7 @@
 source: crates/surtr-tui/src/lib.rs
 expression: "render(&app, w, h)"
 ---
-" SURTR   1 Overview  2 Sensors  3 GPU  4 Capabilities                                                           WARNING "
+" SURTR   1 Overview  2 Sensors  3 GPU  4 Capabilities  5 Stress                                                 WARNING "
 "╭ Health ────────────────────────────────────────────────────────╮╭ System ────────────────────────────────────────────╮"
 "│ CPU       40.0 % load · 4200 MHz · 55.0 °C                     ││ OS                                                 │"
 "│           ▄▅▅▆▆▆▆▆▆▆▆▅▅▄▄▃▃▂▂▂▁▁▁▁▂▂▂▃▃▄                       ││   Name         Mock OS                             │"
@@ -41,4 +41,4 @@ expression: "render(&app, w, h)"
 "╭ Findings ────────────────────────────────────────────────────────────────────────────────────────────────────────────╮"
 "│ !  gpu0 is slowed down by: power limit.                                                                              │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-" q quit  ←/→ tabs  1-4 views  ↑/↓ scroll  / filter  : commands  ? help                                             mock "
+" q quit  ←/→ tabs  1-5 views  ↑/↓ scroll  / filter  : commands  ? help                                             mock "

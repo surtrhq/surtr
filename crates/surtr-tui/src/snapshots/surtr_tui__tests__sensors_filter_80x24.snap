@@ -2,7 +2,7 @@
 source: crates/surtr-tui/src/lib.rs
 expression: "render(&app, 80, 24)"
 ---
-" SURTR   1 Overview  2 Sensors  3 GPU  4 Capabilities                   WARNING "
+" SURTR   1 Overview  2 Sensors  3 GPU  4 Capabilities  5 Stress         WARNING "
 "╭ Sensors · filter "temp" ─────────────────────────────────────────────────────╮"
 "│ Sensor                             Value           Trend                     │"
 "│ cpu0                                                                         │"
