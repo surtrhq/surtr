@@ -932,9 +932,9 @@ fn run(
                 kernels: (*kernel).into(),
                 unmonitored: *unmonitored,
                 requested_by: None,
-                animate: !cli.json && stress::animate(*plain),
             };
-            let (report, exit) = stress::run(hub, &opts, |_| {})?;
+            let animate = !cli.json && stress::animate(*plain);
+            let (report, exit) = stress::run(hub, &opts, animate, |_| {})?;
             code.set(exit);
             out(json!(report), stress::describe(&report))
         }

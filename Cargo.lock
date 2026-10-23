@@ -2745,7 +2745,9 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "surtr-core",
  "surtr-model",
+ "surtr-view",
  "windows-sys",
 ]
 
@@ -2758,6 +2760,7 @@ dependencies = [
  "surtr-backend",
  "surtr-core",
  "surtr-model",
+ "surtr-stress",
  "surtr-view",
 ]
 

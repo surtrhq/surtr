@@ -9,6 +9,8 @@ publish.workspace = true
 
 [dependencies]
 surtr-model.workspace = true
+surtr-core.workspace = true
+surtr-view.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

@@ -11,6 +11,7 @@ publish.workspace = true
 surtr-model.workspace = true
 surtr-core.workspace = true
 surtr-view.workspace = true
+surtr-stress.workspace = true
 ratatui = "0.30"
 
 [dev-dependencies]

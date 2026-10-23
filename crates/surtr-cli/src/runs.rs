@@ -168,7 +168,6 @@ pub fn confirm(hub: &Hub, id: &str, settings: &Config) -> Result<(Report, u8), S
         kernels: surtr_stress::Kernels::Mixed,
         unmonitored: false,
         requested_by: Some(req.client.clone()),
-        animate: stress::animate(false),
     };
     eprintln!(
         "{} asks to run the {} stress test: {} threads for {}.\n\
@@ -194,7 +193,7 @@ pub fn confirm(hub: &Hub, id: &str, settings: &Config) -> Result<(Report, u8), S
         request::save(&dir, &req).map_err(|e| e.to_string())?;
         return Err(format!("turned down request {id}"));
     }
-    stress::run(hub, &opts, |run| {
+    stress::run(hub, &opts, stress::animate(false), |run| {
         req.state = RequestState::Started;
         req.run = Some(run.to_owned());
         let _ = request::save(&dir, &req);
