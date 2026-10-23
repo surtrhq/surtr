@@ -4,7 +4,13 @@ All notable changes to Surtr are listed here. Surtr follows
 [Semantic Versioning](https://semver.org/); before 1.0, minor versions may
 change commands and JSON output.
 
-## [Unreleased]
+## [0.2.0] - 2026-10-23
+
+Stress testing arrives: a verified CPU stress test with host-enforced
+limits, a live flame view, run records with crash evidence, run comparison,
+and stress runs that AI agents can request and a person confirms. Verified
+on a Ryzen 5 3500U; on Windows it waits for a CPU temperature sensor (M5c),
+except for a 60-second `--unmonitored` check.
 
 ### Added
 - `surtr stress cpu`: a verified CPU stress test. Every thread repeats
