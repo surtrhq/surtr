@@ -153,8 +153,9 @@ fn workload_name(
     kernels: surtr_stress::Kernels,
 ) -> String {
     let mut name = "cpu".to_owned();
-    if kernels == surtr_stress::Kernels::Simd {
-        name.push_str("-simd");
+    if kernels != surtr_stress::Kernels::Mixed {
+        name.push('-');
+        name.push_str(kernels.name());
     }
     if per_core {
         name.push_str("-per-core");

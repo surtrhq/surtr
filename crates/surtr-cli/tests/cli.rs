@@ -1935,3 +1935,24 @@ fn simd_kernel_runs_and_says_which() {
     assert_eq!(r["workload"], "cpu-simd");
     let _ = std::fs::remove_dir_all(&data);
 }
+
+#[test]
+fn cache_kernel_runs() {
+    let data = data_dir("cache");
+    let out = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args(["--mock", "--json", "stress", "cpu", "--kernel", "cache"])
+        .args(["--duration", "2s", "--threads", "1"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["kernels"][0], "fft-cache");
+    assert!(v["iterations"][0].as_u64().unwrap() > 0);
+    let _ = std::fs::remove_dir_all(&data);
+}

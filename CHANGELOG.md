@@ -15,6 +15,10 @@ change commands and JSON output.
   (AVX-512, AVX2 or NEON, picked at run time), running the FMA units at
   their peak for the highest power draw; the report names the instruction
   set used.
+- `surtr stress cpu --kernel cache` (an FFT that stays in L2, like Prime95
+  small FFT) and `--kernel memory` (a RAM-sized FFT plus a memory pattern
+  test, about 50 MiB per thread, for the memory controller and fabric, like
+  Prime95 large FFT). Every result is still checked.
 - `surtr stress cpu --pattern transient`: load switching on and off, all
   threads together, with gaps long enough for deep idle; catches crashes at
   idle-to-boost transitions that steady load never triggers. Works with

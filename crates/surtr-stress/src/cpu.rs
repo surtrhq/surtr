@@ -87,6 +87,11 @@ fn kernels(set: Kernels) -> Vec<Kernel> {
     match set {
         Kernels::Mixed => MIXED.to_vec(),
         Kernels::Simd => vec![crate::simd::best()],
+        Kernels::Cache => vec![("fft-cache", crate::memory::fft_cache)],
+        Kernels::Memory => vec![
+            ("fft-memory", crate::memory::fft_memory),
+            ("pattern-memory", crate::memory::pattern_memory),
+        ],
     }
 }
 

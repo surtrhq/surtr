@@ -14,6 +14,7 @@ pub mod compare;
 pub mod cpu;
 pub mod event;
 pub mod html;
+pub mod memory;
 pub mod pattern;
 pub mod record;
 pub mod request;
@@ -59,6 +60,11 @@ pub enum Kernels {
     /// Fused multiply-add on wide vectors (AVX-512, AVX2 or NEON): the
     /// highest power draw.
     Simd,
+    /// An FFT that fits in L2: heat with little memory traffic.
+    Cache,
+    /// A RAM-sized FFT and a memory pattern test: the memory controller,
+    /// caches and fabric.
+    Memory,
 }
 
 impl Kernels {
@@ -67,6 +73,8 @@ impl Kernels {
         match self {
             Self::Mixed => "mixed",
             Self::Simd => "simd",
+            Self::Cache => "cache",
+            Self::Memory => "memory",
         }
     }
 }

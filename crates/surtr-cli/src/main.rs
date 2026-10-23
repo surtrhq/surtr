@@ -420,6 +420,8 @@ enum RunsCommand {
 enum KernelSet {
     Mixed,
     Simd,
+    Cache,
+    Memory,
 }
 
 impl From<KernelSet> for surtr_stress::Kernels {
@@ -427,6 +429,8 @@ impl From<KernelSet> for surtr_stress::Kernels {
         match k {
             KernelSet::Mixed => Self::Mixed,
             KernelSet::Simd => Self::Simd,
+            KernelSet::Cache => Self::Cache,
+            KernelSet::Memory => Self::Memory,
         }
     }
 }
@@ -489,7 +493,10 @@ enum StressCommand {
         siblings: bool,
         /// mixed: integer and floating point. simd: fused multiply-add on
         /// wide vectors (AVX-512, AVX2 or NEON, whichever the CPU has), the
-        /// highest power draw; undervolts often fail only under it.
+        /// highest power draw; undervolts often fail only under it. cache:
+        /// an FFT that stays in L2 (like Prime95 small FFT). memory: a
+        /// RAM-sized FFT and a pattern test, about 50 MiB per thread, for
+        /// the memory controller and fabric (like Prime95 large FFT).
         #[arg(long, value_enum, default_value_t = KernelSet::Mixed)]
         kernel: KernelSet,
         /// steady: full load all the time. transient: load switching on and
