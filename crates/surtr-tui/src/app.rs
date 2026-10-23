@@ -192,6 +192,7 @@ impl App {
 
     /// Reads everything once more; `name` fills in process names.
     pub fn refresh(&mut self, hub: &Hub, name: &dyn Fn(u32) -> Option<String>) {
+        self.stress.refresh_requests();
         self.samples = hub.read();
         for s in &self.samples {
             if let Some(v) = s.value {

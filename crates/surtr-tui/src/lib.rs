@@ -273,6 +273,21 @@ mod tests {
     }
 
     #[test]
+    fn stress_tab_past_runs() {
+        use crate::stress::{Stress, tests};
+        let (_hub, mut app) = mock_app();
+        app.stress = Stress::new(Some(tests::setup()), tests::topo(), tests::tctl());
+        app.tab = Tab::Stress;
+        app.stress.show_runs(vec![
+            tests::record("20261023-110000-cpu", 1100, 71.0),
+            tests::record("20261023-100000-cpu", 1000, 70.0),
+        ]);
+        press(&mut app, KeyCode::Char('c'));
+        press(&mut app, KeyCode::Down);
+        insta::assert_snapshot!("stress_runs_100x24", render(&app, 100, 24));
+    }
+
+    #[test]
     fn tiny_terminal_does_not_panic() {
         let (_hub, mut app) = mock_app();
         for tab in Tab::ALL {

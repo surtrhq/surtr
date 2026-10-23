@@ -1,5 +1,6 @@
 //! The Stress tab: a form for the built-in CPU test, a confirmation, the
-//! run with its flames, and the result. The run itself happens on a thread
+//! run with its flames, and the result; past runs and comparing them; and
+//! AI agents' requests, which a person approves here or denies. The run itself happens on a thread
 //! the event loop starts (see [`crate::run`]); this module only holds the
 //! state and turns keys into a request.
 
@@ -14,12 +15,15 @@ use std::{
 };
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use surtr_model::Timestamp;
 use surtr_stress::{
-    Kernels,
+    Kernels, compare,
     host::{self, Finished, Observer, Options},
-    html::span,
+    html::{self, span},
     live::Live,
     pattern::Pattern,
+    record::{self, Record},
+    request::{self, Request, RequestState},
     runner::{UNMONITORED_MAX, Watched},
     topology::{self, LogicalCpu},
 };
@@ -92,6 +96,8 @@ pub enum Phase {
     Running,
     /// Over: the result, or why it didn't start.
     Done,
+    /// Past runs.
+    Runs,
 }
 
 /// The form's values.
@@ -141,12 +147,16 @@ pub struct Shared {
     pub result: Option<Result<Finished, String>>,
 }
 
-/// Passes the host's messages to the tab.
-pub struct Relay(pub Arc<Mutex<Shared>>);
+/// Passes the host's messages to the tab, and marks an agent's request
+/// started once its run is recorded.
+pub struct Relay {
+    shared: Arc<Mutex<Shared>>,
+    request: Option<(PathBuf, Request)>,
+}
 
 impl Relay {
     fn with(&self, f: impl FnOnce(&mut Shared)) {
-        f(&mut self.0.lock().unwrap_or_else(PoisonError::into_inner));
+        f(&mut self.shared.lock().unwrap_or_else(PoisonError::into_inner));
     }
 }
 
@@ -159,6 +169,14 @@ impl Observer for Relay {
     fn live(&mut self, state: &Arc<Mutex<Live>>) {
         self.with(|s| s.live = Some(Arc::clone(state)));
     }
+
+    fn recorded(&mut self, id: &str) {
+        if let Some((dir, mut req)) = self.request.take() {
+            req.state = RequestState::Started;
+            req.run = Some(id.to_owned());
+            let _ = request::save(&dir, &req);
+        }
+    }
 }
 
 /// A run the event loop should start.
@@ -170,6 +188,21 @@ pub struct Start {
     pub shared: Arc<Mutex<Shared>>,
     /// Stops it.
     pub stop: Arc<AtomicBool>,
+    /// The agent's request it answers.
+    pub request: Option<Request>,
+}
+
+/// The past-runs view.
+#[derive(Debug, Default)]
+pub struct Runs {
+    /// Recorded runs, newest first.
+    pub records: Vec<Record>,
+    /// The selected row.
+    pub row: usize,
+    /// The run marked as the baseline for a comparison.
+    pub marked: Option<usize>,
+    /// A run or a comparison as text, with its title, over the list.
+    pub detail: Option<(String, String)>,
 }
 
 /// The Stress tab's state.
@@ -197,6 +230,15 @@ pub struct Stress {
     pub quit_after: bool,
     /// The flames' heat, kept between frames.
     pub fire: RefCell<Fire>,
+    /// Agents' requests waiting for a person, oldest first.
+    pub pending: Vec<Request>,
+    /// The request being reviewed: the confirmation shows it instead of the
+    /// form's choices.
+    pub request: Option<Request>,
+    /// Past runs.
+    pub runs: Runs,
+    /// The last problem reading or writing runs or requests.
+    pub problem: Option<String>,
 }
 
 impl Stress {
@@ -218,7 +260,116 @@ impl Stress {
             stop: Arc::default(),
             quit_after: false,
             fire: RefCell::new(Fire::new(0x2545_F491_4F6C_DD1D)),
+            pending: Vec::new(),
+            request: None,
+            runs: Runs::default(),
+            problem: None,
         }
+    }
+
+    fn runs_dir(&self) -> Option<&PathBuf> {
+        self.setup.as_ref()?.runs_dir.as_ref()
+    }
+
+    /// Reads the agents' requests again; call it on every refresh.
+    pub fn refresh_requests(&mut self) {
+        let Some(dir) = self.runs_dir() else { return };
+        match request::pending(dir, Timestamp::now().0) {
+            Ok(p) => self.pending = p,
+            Err(e) => self.problem = Some(format!("Couldn't read the agents' requests: {e}")),
+        }
+        // One being reviewed that expired or was answered elsewhere is gone.
+        if self.phase == Phase::Confirm
+            && let Some(r) = &self.request
+            && !self.pending.iter().any(|p| p.id == r.id)
+        {
+            self.request = None;
+            self.phase = Phase::Form;
+        }
+    }
+
+    /// Opens the past runs, newest first.
+    pub fn open_runs(&mut self) {
+        let Some(dir) = self.runs_dir() else { return };
+        match record::load_all(dir) {
+            Ok((mut records, _)) => {
+                records.reverse();
+                self.show_runs(records);
+            }
+            Err(e) => self.problem = Some(format!("Couldn't read the runs: {e}")),
+        }
+    }
+
+    /// Shows these runs (newest first).
+    pub fn show_runs(&mut self, records: Vec<Record>) {
+        self.runs = Runs {
+            records,
+            ..Runs::default()
+        };
+        self.phase = Phase::Runs;
+    }
+
+    fn deny(&mut self, mut req: Request) {
+        let Some(dir) = self.runs_dir().cloned() else {
+            return;
+        };
+        req.state = RequestState::Denied;
+        if let Err(e) = request::save(&dir, &req) {
+            self.problem = Some(format!("Couldn't turn down request {}: {e}", req.id));
+        }
+        self.pending.retain(|p| p.id != req.id);
+    }
+
+    /// One line about an agent's request.
+    pub fn request_text(&self, r: &Request) -> String {
+        format!(
+            "{} asks to run the {} stress test: {} threads for {}.",
+            r.client,
+            r.workload,
+            r.threads
+                .map_or_else(|| format!("all {}", self.logical()), |t| t.to_string()),
+            short(Duration::from_millis(r.duration_ms))
+        )
+    }
+
+    fn runs_key(&mut self, k: KeyEvent) -> bool {
+        let runs = &mut self.runs;
+        if runs.detail.is_some() {
+            match k.code {
+                KeyCode::Esc | KeyCode::Backspace | KeyCode::Enter => runs.detail = None,
+                _ => return false,
+            }
+            return true;
+        }
+        let n = runs.records.len();
+        match k.code {
+            KeyCode::Up | KeyCode::Char('k') => runs.row = runs.row.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => {
+                runs.row = (runs.row + 1).min(n.saturating_sub(1))
+            }
+            KeyCode::Enter => {
+                if let Some(r) = runs.records.get(runs.row) {
+                    runs.detail = Some((r.id.clone(), run_text(r)));
+                }
+            }
+            KeyCode::Char('c') => match runs.marked {
+                // The marked run is the baseline; the selected one is compared
+                // with it.
+                Some(m) if m != runs.row => {
+                    if let (Some(a), Some(b)) = (runs.records.get(m), runs.records.get(runs.row)) {
+                        let text = compare::text(&compare::compare(a, b));
+                        runs.detail = Some((format!("{} → {}", a.id, b.id), text));
+                    }
+                    runs.marked = None;
+                }
+                Some(_) => runs.marked = None,
+                None if n > 0 => runs.marked = Some(runs.row),
+                None => {}
+            },
+            KeyCode::Esc | KeyCode::Backspace => self.phase = Phase::Form,
+            _ => return false,
+        }
+        true
     }
 
     /// The form's rows for the chosen mode.
@@ -317,10 +468,27 @@ impl Stress {
         }
     }
 
-    /// The options the form stands for.
+    /// The options the form stands for, or the request being reviewed.
     pub fn options(&self) -> Options {
         let setup = self.setup.as_ref();
         let f = &self.form;
+        if let Some(r) = &self.request {
+            // What `surtr runs confirm` runs: the default test, as asked.
+            return Options {
+                duration: Duration::from_millis(r.duration_ms),
+                max_duration: setup.map_or(Duration::ZERO, |s| s.max_duration),
+                max_temp_c: setup.map_or(0.0, |s| s.max_temp_c),
+                threads: r.threads,
+                cpus: None,
+                smt: true,
+                per_core: None,
+                siblings: false,
+                pattern: Pattern::Steady,
+                kernels: Kernels::Mixed,
+                unmonitored: self.watched.is_empty(),
+                requested_by: Some(r.client.clone()),
+            };
+        }
         Options {
             duration: LENGTHS[f.length],
             max_duration: setup.map_or(Duration::ZERO, |s| s.max_duration),
@@ -348,9 +516,9 @@ impl Stress {
         let Some(setup) = &self.setup else {
             return Err("Stress tests aren't available here.".to_owned());
         };
-        let f = &self.form;
+        let o = self.options();
         let mut lines = Vec::new();
-        let total = if f.per_core {
+        let total = if let Some(each) = o.per_core {
             if self.watched.is_empty() {
                 return Err(
                     "Testing one core at a time needs a CPU temperature sensor to \
@@ -359,7 +527,6 @@ impl Stress {
                 );
             }
             let cores = self.cores();
-            let each = EACH[f.each];
             let total = each * u32::try_from(cores).unwrap_or(u32::MAX);
             lines.push(format!(
                 "{cores} cores one at a time, {} each: {} in all.",
@@ -368,8 +535,8 @@ impl Stress {
             ));
             total
         } else {
-            let cpus = topology::placement(&self.topology, f.threads, f.smt)?;
-            let mut length = LENGTHS[f.length];
+            let cpus = topology::placement(&self.topology, o.threads, o.smt)?;
+            let mut length = o.duration;
             if self.watched.is_empty() {
                 length = length.min(UNMONITORED_MAX);
             }
@@ -486,6 +653,7 @@ impl Stress {
             return false;
         }
         match self.phase {
+            Phase::Runs => self.runs_key(k),
             Phase::Form => {
                 let fields = self.fields();
                 self.row = self.row.min(fields.len() - 1);
@@ -499,9 +667,20 @@ impl Stress {
                         self.change(fields[self.row], true);
                     }
                     KeyCode::Enter => {
+                        self.request = None;
                         if self.plan().is_ok() {
                             self.phase = Phase::Confirm;
                         }
+                    }
+                    KeyCode::Char('r') => self.open_runs(),
+                    // The oldest request waiting: review it, or turn it down.
+                    KeyCode::Char('a') if !self.pending.is_empty() => {
+                        self.request = self.pending.first().cloned();
+                        self.phase = Phase::Confirm;
+                    }
+                    KeyCode::Char('d') if !self.pending.is_empty() => {
+                        let req = self.pending[0].clone();
+                        self.deny(req);
                     }
                     _ => return false,
                 }
@@ -512,15 +691,28 @@ impl Stress {
                     KeyCode::Char('y' | 'Y') => {
                         self.shared = Arc::default();
                         self.stop = Arc::default();
+                        if self.plan().is_err() {
+                            return true;
+                        }
                         self.start = Some(Start {
                             options: self.options(),
                             shared: Arc::clone(&self.shared),
                             stop: Arc::clone(&self.stop),
+                            request: self.request.take(),
                         });
                         *self.fire.borrow_mut() = Fire::new(0x2545_F491_4F6C_DD1D);
                         self.phase = Phase::Running;
                     }
-                    KeyCode::Char('n' | 'N') | KeyCode::Esc | KeyCode::Backspace => {
+                    // n turns an agent's request down, as in `surtr runs confirm`;
+                    // Esc leaves it waiting.
+                    KeyCode::Char('n' | 'N') => {
+                        if let Some(req) = self.request.take() {
+                            self.deny(req);
+                        }
+                        self.phase = Phase::Form;
+                    }
+                    KeyCode::Esc | KeyCode::Backspace => {
+                        self.request = None;
                         self.phase = Phase::Form;
                     }
                     _ => {}
@@ -556,6 +748,36 @@ fn ms(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
 
+/// A recorded run as text, like `surtr runs show`.
+pub fn run_text(r: &Record) -> String {
+    let mut out = format!(
+        "{}
+",
+        html::verdict(r).0
+    );
+    match &r.report {
+        Some(rep) => out.push_str(&host::describe(rep)),
+        None => {
+            let s = compare::summary(r);
+            out.push_str(&format!(
+                "  {} threads · {} recorded{}
+",
+                r.threads,
+                span(s.length_ms),
+                s.peak_temp_c
+                    .map_or_else(String::new, |p| format!(" · peak {p:.1} °C"))
+            ));
+        }
+    }
+    if let Some(by) = &r.requested_by {
+        out.push_str(&format!(
+            "  asked for by {by}
+"
+        ));
+    }
+    out
+}
+
 /// A length for the form: `5m` for whole minutes, else as runs show it.
 fn short(d: Duration) -> String {
     let s = d.as_secs();
@@ -573,7 +795,12 @@ pub fn run(hub: &surtr_core::Hub, setup: &StressSetup, start: Start) {
         runs_dir: setup.runs_dir.clone(),
         stop: start.stop,
     };
-    let mut relay = Relay(Arc::clone(&start.shared));
+    let mut relay = Relay {
+        shared: Arc::clone(&start.shared),
+        request: start
+            .request
+            .and_then(|r| Some((setup.runs_dir.clone()?, r))),
+    };
     let result = host::run(hub, &start.options, &host_setup, &mut relay);
     start
         .shared
@@ -714,5 +941,146 @@ pub(crate) mod tests {
         assert_eq!(s.form.threads, None);
         press(&mut s, KeyCode::Right);
         assert_eq!(s.form.threads, Some(1));
+    }
+
+    /// A finished 60-second run at `rate` iterations per second.
+    pub fn record(id: &str, rate: u64, peak: f64) -> Record {
+        use surtr_stress::{
+            record::{SCHEMA, State, Tick},
+            runner::{Outcome, Report},
+        };
+        let timeline: Vec<Tick> = (0..=60u64)
+            .map(|s| Tick {
+                elapsed_ms: s * 1000,
+                temp_c: Some(peak - 5.0 + s as f64 / 12.0),
+                iterations: s * rate,
+            })
+            .collect();
+        Record {
+            schema: SCHEMA,
+            id: id.into(),
+            workload: "cpu".into(),
+            state: State::Done,
+            started: "2026-10-23T14:12:00Z".into(),
+            ended: None,
+            planned_ms: 60_000,
+            threads: 2,
+            cpus: vec![0, 2],
+            surtr: "0.3.0".into(),
+            machine: Vec::new(),
+            watched: Vec::new(),
+            requested_by: None,
+            errors_seen: 0,
+            timeline,
+            report: Some(Report {
+                outcome: Outcome::Passed,
+                threads: 2,
+                duration_ms: 60_000,
+                iterations: vec![30 * rate, 30 * rate],
+                failures: Vec::new(),
+                peak_temp_c: Some(peak),
+                watched: Vec::new(),
+                kernels: vec!["integer".into(), "float".into()],
+                per_core: Vec::new(),
+            }),
+        }
+    }
+
+    /// A fresh runs directory for one test.
+    fn runs_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("surtr-tui-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn past_runs_show_and_compare() {
+        let dir = runs_dir("runs");
+        for (id, rate) in [("20261023-100000-cpu", 1000), ("20261023-110000-cpu", 1100)] {
+            let r = record(id, rate, 70.0);
+            let report = r.report.clone().unwrap();
+            record::Journal::start(&dir, Record { report: None, ..r })
+                .unwrap()
+                .finish(report, "2026-10-23T14:13:00Z".into())
+                .unwrap();
+        }
+        let mut setup = setup();
+        setup.runs_dir = Some(dir.clone());
+        let mut s = Stress::new(Some(setup), topo(), tctl());
+        press(&mut s, KeyCode::Char('r'));
+        assert_eq!(s.phase, Phase::Runs);
+        // Newest first.
+        assert_eq!(s.runs.records[0].id, "20261023-110000-cpu");
+        press(&mut s, KeyCode::Enter);
+        let (title, text) = s.runs.detail.clone().unwrap();
+        assert_eq!(title, "20261023-110000-cpu");
+        assert!(text.contains("PASSED"), "{text}");
+        press(&mut s, KeyCode::Esc);
+        assert!(s.runs.detail.is_none());
+        // Mark the older run as the baseline, then compare the newer one.
+        press(&mut s, KeyCode::Down);
+        press(&mut s, KeyCode::Char('c'));
+        press(&mut s, KeyCode::Up);
+        press(&mut s, KeyCode::Char('c'));
+        let (title, text) = s.runs.detail.clone().unwrap();
+        assert_eq!(title, "20261023-100000-cpu → 20261023-110000-cpu");
+        assert!(text.contains("+10.0%"), "{text}");
+        press(&mut s, KeyCode::Esc);
+        press(&mut s, KeyCode::Esc);
+        assert_eq!(s.phase, Phase::Form);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn agents_requests_are_approved_or_denied_here() {
+        let dir = runs_dir("requests");
+        let now = Timestamp::now().0;
+        let first = request::create(&dir, "agent 1.0", "cpu", 120_000, Some(2), now).unwrap();
+        let mut setup = setup();
+        setup.runs_dir = Some(dir.clone());
+        let mut s = Stress::new(Some(setup), topo(), tctl());
+        s.refresh_requests();
+        assert_eq!(s.pending.len(), 1);
+        assert_eq!(
+            s.request_text(&s.pending[0]),
+            "agent 1.0 asks to run the cpu stress test: 2 threads for 2m."
+        );
+        // Review it: the confirmation shows the request, not the form.
+        press(&mut s, KeyCode::Char('a'));
+        assert_eq!(s.phase, Phase::Confirm);
+        assert_eq!(s.plan().unwrap()[0], "2 threads on CPUs 0,2 for 2m.");
+        assert_eq!(s.options().requested_by.as_deref(), Some("agent 1.0"));
+        // Esc leaves it waiting; n turns it down.
+        press(&mut s, KeyCode::Esc);
+        assert_eq!(s.pending.len(), 1);
+        press(&mut s, KeyCode::Char('a'));
+        press(&mut s, KeyCode::Char('n'));
+        let state = |id: &str| request::load(&dir, id, now).unwrap().unwrap().state;
+        assert_eq!(state(&first.id), RequestState::Denied);
+        assert!(s.pending.is_empty());
+        // d turns one down from the form.
+        let second = request::create(&dir, "agent 1.0", "cpu", 60_000, None, now).unwrap();
+        s.refresh_requests();
+        press(&mut s, KeyCode::Char('d'));
+        assert_eq!(state(&second.id), RequestState::Denied);
+        // y starts it; once recorded, the request points at its run.
+        let third = request::create(&dir, "agent 1.0", "cpu", 60_000, None, now).unwrap();
+        s.refresh_requests();
+        press(&mut s, KeyCode::Char('a'));
+        press(&mut s, KeyCode::Char('y'));
+        let start = s.start.take().unwrap();
+        assert_eq!(start.options.requested_by.as_deref(), Some("agent 1.0"));
+        let mut relay = Relay {
+            shared: start.shared,
+            request: Some((dir.clone(), start.request.unwrap())),
+        };
+        relay.recorded("20261023-120000-cpu");
+        let got = request::load(&dir, &third.id, now).unwrap().unwrap();
+        assert_eq!(
+            (got.state, got.run.as_deref()),
+            (RequestState::Started, Some("20261023-120000-cpu"))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

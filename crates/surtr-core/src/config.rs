@@ -36,7 +36,8 @@ pub const TEMPLATE: &str = r#"# Surtr settings. Every setting is optional; comma
 
 [mcp]
 # Let AI agents ask for stress tests over MCP. Each run still starts only
-# when you type `surtr runs confirm <code>` in a terminal.
+# when you type `surtr runs confirm <code>` in a terminal or approve it in
+# the Stress tab of `surtr tui`.
 # allow_stress = false
 "#;
 

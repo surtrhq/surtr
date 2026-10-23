@@ -166,10 +166,20 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
         return;
     }
     let keys = match (app.tab, app.stress.phase) {
+        (Tab::Stress, Phase::Form) if !app.stress.pending.is_empty() => {
+            " a review the request  d deny it  ↑/↓ choose  ←/→ change  Enter start  r runs"
+        }
         (Tab::Stress, Phase::Form) => {
-            " ↑/↓ choose  ←/→ change  Enter start  Tab views  q quit  ? help"
+            " ↑/↓ choose  ←/→ change  Enter start  r past runs  Tab views  q quit"
+        }
+        (Tab::Stress, Phase::Confirm) if app.stress.request.is_some() => {
+            " y start the test  n deny  Esc decide later"
         }
         (Tab::Stress, Phase::Confirm) => " y start the test  n back",
+        (Tab::Stress, Phase::Runs) if app.stress.runs.detail.is_some() => " Esc back to the runs",
+        (Tab::Stress, Phase::Runs) => {
+            " ↑/↓ choose  Enter show  c mark, then c on another to compare  Esc back"
+        }
         (Tab::Stress, Phase::Running) => " s stop the test  Tab views  q stop and quit",
         (Tab::Stress, Phase::Done) => " Enter new test  Tab views  q quit",
         _ => " q quit  ←/→ tabs  1-5 views  ↑/↓ scroll  / filter  : commands  ? help",
@@ -601,8 +611,20 @@ fn draw_stress(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
         return;
     }
     match s.phase {
+        Phase::Runs => draw_runs(f, area, app, p),
         Phase::Form | Phase::Confirm => {
-            let mut lines = vec![Line::raw("")];
+            let mut lines = Vec::new();
+            // Agents' requests come first: someone is waiting for an answer.
+            for r in &s.pending {
+                lines.push(Line::styled(
+                    format!(" ● {}", s.request_text(r)),
+                    p.style(Role::Warn).add_modifier(Modifier::BOLD),
+                ));
+            }
+            if let Some(problem) = &s.problem {
+                lines.push(Line::styled(format!(" {problem}"), p.style(Role::Critical)));
+            }
+            lines.push(Line::raw(""));
             for (i, field) in s.fields().into_iter().enumerate() {
                 let (label, value) = s.row_text(field);
                 let selected = i == s.row && s.phase == Phase::Form;
@@ -706,10 +728,82 @@ fn draw_stress(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
     }
 }
 
+fn draw_runs(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
+    let runs = &app.stress.runs;
+    if let Some((title, text)) = &runs.detail {
+        let lines: Vec<Line> = text.lines().map(|l| Line::raw(format!(" {l}"))).collect();
+        f.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .block(block(title, p)),
+            area,
+        );
+        return;
+    }
+    if runs.records.is_empty() {
+        let text = Paragraph::new(Line::styled(" No stress runs yet.", p.style(Role::Missing)));
+        f.render_widget(text.block(block("Past runs", p)), area);
+        return;
+    }
+    // Keep the selected row in view.
+    let visible = usize::from(area.height.saturating_sub(3)).max(1);
+    let first = runs.row.saturating_sub(visible - 1);
+    let rows: Vec<Row> = runs
+        .records
+        .iter()
+        .enumerate()
+        .skip(first)
+        .map(|(i, r)| {
+            let s = surtr_stress::compare::summary(r);
+            let mark = if runs.marked == Some(i) { "*" } else { " " };
+            let style = if i == runs.row {
+                p.style(Role::Accent).add_modifier(Modifier::REVERSED)
+            } else {
+                Style::new()
+            };
+            Row::new(vec![
+                Cell::from(format!("{mark}{}", r.id)),
+                Cell::from(r.started.replace('T', " ").trim_end_matches('Z').to_owned()),
+                Cell::from(surtr_stress::html::span(s.length_ms)),
+                Cell::from(s.result),
+                Cell::from(
+                    s.peak_temp_c
+                        .map_or_else(|| "-".to_owned(), |t| format!("{t:.0} °C")),
+                ),
+            ])
+            .style(style)
+        })
+        .collect();
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(36),
+            Constraint::Length(20),
+            Constraint::Length(8),
+            Constraint::Min(10),
+            Constraint::Length(7),
+        ],
+    )
+    .header(
+        Row::new(vec![" Run", "Started (UTC)", "Length", "Result", "Peak"])
+            .style(p.style(Role::Muted)),
+    )
+    .block(block("Past runs", p));
+    f.render_widget(table, area);
+}
+
 fn draw_confirm(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
+    let s = &app.stress;
     let mut lines = vec![Line::raw("")];
-    for l in app.stress.plan().unwrap_or_default() {
-        lines.push(Line::raw(l));
+    if let Some(r) = &s.request {
+        lines.push(Line::styled(
+            s.request_text(r),
+            p.style(Role::Accent).add_modifier(Modifier::BOLD),
+        ));
+    }
+    match s.plan() {
+        Ok(plan) => lines.extend(plan.into_iter().map(Line::raw)),
+        Err(why) => lines.push(Line::styled(why, p.style(Role::Warn))),
     }
     lines.extend([
         Line::raw(""),
@@ -722,10 +816,19 @@ fn draw_confirm(f: &mut Frame, area: Rect, app: &App, p: &Palette) {
             Span::styled("y", p.style(Role::Accent).add_modifier(Modifier::BOLD)),
             Span::raw(" start   "),
             Span::styled("n", p.style(Role::Accent).add_modifier(Modifier::BOLD)),
-            Span::raw(" back"),
+            Span::raw(if s.request.is_some() {
+                " deny   "
+            } else {
+                " back"
+            }),
+            Span::styled(
+                if s.request.is_some() { "Esc" } else { "" },
+                p.style(Role::Accent).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(if s.request.is_some() { " later" } else { "" }),
         ]),
     ]);
-    let popup = centered(area, 64, 12);
+    let popup = centered(area, 64, 13);
     f.render_widget(Clear, popup);
     f.render_widget(
         Paragraph::new(lines)

@@ -12,6 +12,10 @@ change commands and JSON output.
   pattern; see what will run and where it stops, confirm, watch the flames,
   stop with `s`. The same limits and records as `surtr stress cpu`;
   quitting during a run stops it first.
+- In the same tab: past runs (`r`), each run's report, and comparing two
+  (`c` on one, then `c` on the other); and AI agents' stress requests,
+  shown as they arrive, to approve (`a`, then `y`) or deny (`d`) without
+  typing the code.
 
 ## [0.3.0] - 2026-10-23
 

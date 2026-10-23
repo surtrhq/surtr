@@ -1,8 +1,9 @@
 //! Stress-run requests from AI agents (plan, section 6.1, `run` scope).
 //!
 //! An agent never starts a run. It files a request, and a person confirms it
-//! with `surtr runs confirm <id>` in a terminal on the machine; the run then
-//! happens in that terminal, under the usual limits. Requests left alone
+//! with `surtr runs confirm <id>` in a terminal on the machine, or in the
+//! Stress tab of `surtr tui`; the run then happens there, under the usual
+//! limits. Requests left alone
 //! expire. Each request is a small JSON file in `runs/requests/`.
 
 use std::{
@@ -135,6 +136,29 @@ pub fn load(runs: &Path, id: &str, now_ms: u64) -> io::Result<Option<Request>> {
     Ok(Some(request))
 }
 
+/// The requests still waiting for a person as of `now_ms`, oldest first.
+pub fn pending(runs: &Path, now_ms: u64) -> io::Result<Vec<Request>> {
+    let entries = match fs::read_dir(dir(runs)) {
+        Ok(e) => e,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut found = Vec::new();
+    for entry in entries {
+        let name = entry?.file_name();
+        let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".json")) else {
+            continue;
+        };
+        if let Some(r) = load(runs, id, now_ms)?
+            && r.state == RequestState::Pending
+        {
+            found.push(r);
+        }
+    }
+    found.sort_by_key(|r| r.created_ms);
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +179,14 @@ mod tests {
         // Stored as expired: it stays expired even if asked about earlier.
         let got = load(&runs, &r.id, 0).unwrap().unwrap();
         assert_eq!(got.state, RequestState::Expired);
+
+        // Only the one still waiting is pending; then it expires too.
+        let waiting = pending(&runs, 1_000_000).unwrap();
+        assert_eq!(
+            waiting.iter().map(|r| &r.id).collect::<Vec<_>>(),
+            [&again.id]
+        );
+        assert!(pending(&runs, 1_000_001 + EXPIRES_MS).unwrap().is_empty());
 
         assert!(load(&runs, "../../etc/passwd", 0).unwrap().is_none());
         assert!(load(&runs, "abcdef", 0).unwrap().is_none());

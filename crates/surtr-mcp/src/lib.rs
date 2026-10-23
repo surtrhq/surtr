@@ -47,7 +47,8 @@ const INSTRUCTIONS: &str = "Surtr reports this machine's hardware: system \
 /// Added to [`INSTRUCTIONS`] when the owner allows stress requests.
 const STRESS_INSTRUCTIONS: &str = " The owner also allows stress-test requests: \
     start_stress_test only files a request, and the run starts when a person \
-    types `surtr runs confirm <code>` in a terminal on this machine. Explain \
+    types `surtr runs confirm <code>` in a terminal on this machine, or \
+    approves it in the Stress tab of `surtr tui`. Explain \
     what the test does and that it heats the machine and slows it down; never \
     press the user to confirm.";
 
@@ -418,7 +419,8 @@ impl Server {
     #[tool(
         description = "Ask to run the built-in CPU stress test. This does not start it: it \
                        returns a code, and the run starts only when a person types \
-                       `surtr runs confirm <code>` in a terminal on this machine. The test \
+                       `surtr runs confirm <code>` in a terminal on this machine or \
+                       approves it in the Stress tab of `surtr tui`. The test \
                        heats the machine, slows everything else down, stops at the \
                        temperature limit, and can crash an unstable machine.",
         annotations(
@@ -460,7 +462,8 @@ impl Server {
                 "expires_in_minutes": request::EXPIRES_MS / 60_000,
                 "next": format!(
                     "Ask the user to run `surtr runs confirm {}` in a terminal on this \
-                     machine (or `surtr runs deny {}`). Check progress with get_run_status.",
+                     machine (or `surtr runs deny {}`), or to approve it in the Stress \
+                     tab of `surtr tui`. Check progress with get_run_status.",
                     r.id, r.id
                 ),
             }))

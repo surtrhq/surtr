@@ -125,7 +125,7 @@ pub fn command(command: Option<&RunsCommand>, json: bool) -> Result<String, Stri
             if json {
                 return Ok(serde_json::to_string_pretty(&c).map_err(|e| e.to_string())? + "\n");
             }
-            Ok(compare_text(&c))
+            Ok(surtr_stress::compare::text(&c))
         }
         Some(RunsCommand::Confirm { .. }) => unreachable!("needs the hardware; see confirm"),
         Some(RunsCommand::Report { id, out }) => {
@@ -198,93 +198,4 @@ pub fn confirm(hub: &Hub, id: &str, settings: &Config) -> Result<(Report, u8), S
         req.run = Some(run.to_owned());
         let _ = request::save(&dir, &req);
     })
-}
-
-/// Two runs side by side, with the change from the first to the second.
-fn compare_text(c: &surtr_stress::compare::Comparison) -> String {
-    use surtr_stress::compare::Summary;
-    let mut out = String::new();
-    let row = |out: &mut String, name: &str, a: String, b: String, change: String| {
-        let _ = writeln!(out, "{name:<20} {a:<26} {b:<26} {change}");
-    };
-    let cpus = |s: &Summary| {
-        let list: Vec<String> = s.cpus.iter().map(u32::to_string).collect();
-        if list.is_empty() {
-            s.threads.to_string()
-        } else {
-            format!("{} ({})", s.threads, list.join(","))
-        }
-    };
-    let rate = |s: &Summary| {
-        s.rate
-            .map_or_else(|| "-".to_owned(), |r| format!("{r:.0}/s"))
-    };
-    let temp = |t: Option<f64>| t.map_or_else(|| "-".to_owned(), |t| format!("{t:.1} °C"));
-    let pct = |p: Option<f64>| p.map_or_else(String::new, |p| format!("{p:+.1}%"));
-    let deg = |d: Option<f64>| d.map_or_else(String::new, |d| format!("{d:+.1} °C"));
-    row(&mut out, "", c.a.id.clone(), c.b.id.clone(), String::new());
-    row(
-        &mut out,
-        "Result",
-        c.a.result.clone(),
-        c.b.result.clone(),
-        String::new(),
-    );
-    row(
-        &mut out,
-        "Length",
-        span(c.a.length_ms),
-        span(c.b.length_ms),
-        String::new(),
-    );
-    row(
-        &mut out,
-        "Threads (CPUs)",
-        cpus(&c.a),
-        cpus(&c.b),
-        String::new(),
-    );
-    row(
-        &mut out,
-        "Throughput",
-        rate(&c.a),
-        rate(&c.b),
-        pct(c.rate_change_pct),
-    );
-    row(
-        &mut out,
-        "Peak temperature",
-        temp(c.a.peak_temp_c),
-        temp(c.b.peak_temp_c),
-        deg(c.peak_temp_change_c),
-    );
-    row(
-        &mut out,
-        "Average temperature",
-        temp(c.a.avg_temp_c),
-        temp(c.b.avg_temp_c),
-        deg(c.avg_temp_change_c),
-    );
-    let sag = |s: &Summary| {
-        s.sag_pct
-            .map_or_else(|| "-".to_owned(), |p| format!("{p:.1}%"))
-    };
-    row(
-        &mut out,
-        "Sag (throttling)",
-        sag(&c.a),
-        sag(&c.b),
-        String::new(),
-    );
-    row(
-        &mut out,
-        "Errors",
-        c.a.errors.to_string(),
-        c.b.errors.to_string(),
-        String::new(),
-    );
-    for w in &c.warnings {
-        let _ = writeln!(out, "! {w}");
-    }
-    out
 }
