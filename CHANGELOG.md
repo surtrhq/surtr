@@ -4,6 +4,15 @@ All notable changes to Surtr are listed here. Surtr follows
 [Semantic Versioning](https://semver.org/); before 1.0, minor versions may
 change commands and JSON output.
 
+## [Unreleased]
+
+### Added
+- `surtr tui` has a Stress tab: choose the test (mixed, SIMD, cache or
+  memory), all cores or one at a time, threads, SMT, length and load
+  pattern; see what will run and where it stops, confirm, watch the flames,
+  stop with `s`. The same limits and records as `surtr stress cpu`;
+  quitting during a run stops it first.
+
 ## [0.3.0] - 2026-10-23
 
 The stress tests tuners use: one core at a time for per-core tuning, a
