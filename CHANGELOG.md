@@ -16,6 +16,17 @@ change commands and JSON output.
   (`c` on one, then `c` on the other); and AI agents' stress requests,
   shown as they arrive, to approve (`a`, then `y`) or deny (`d`) without
   typing the code.
+- AMD GPUs on Linux report throttle reasons (`surtr gpu throttle`, the API,
+  MCP and `/metrics`), read from the kernel's `gpu_metrics` table. Going by
+  the kernel source, that covers Radeon RX 5000 to RX 9000, Instinct MI100
+  and MI200, and the Van Gogh and Renoir APUs; not yet checked on real
+  hardware (#8). GPUs whose table leaves the status out stay `unsupported`.
+- Two new throttle reasons: `current_limit` (TDC or EDC) and `other` (a
+  limit the GPU reports that Surtr doesn't classify).
+
+### Changed
+- `software_thermal` now reads "thermal limit (driver or firmware)": on AMD
+  the GPU firmware applies temperature limits.
 
 ### Changed
 - A sensor that gave no valid value in one read now shows "no reading"

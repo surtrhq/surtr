@@ -45,7 +45,8 @@ pub enum ThrottleReason {
     HardwareSlowdown,
     /// Clocks are synchronized with other GPUs.
     SyncBoost,
-    /// The driver lowers clocks to stay under a temperature limit.
+    /// The driver or GPU firmware lowers clocks to stay under a temperature
+    /// limit.
     SoftwareThermal,
     /// Hardware thermal protection is active.
     HardwareThermal,
@@ -53,11 +54,15 @@ pub enum ThrottleReason {
     HardwarePowerBrake,
     /// Clocks follow a display clock setting.
     DisplayClocks,
+    /// A current limit (TDC or EDC) is reached.
+    CurrentLimit,
+    /// The device reports a limit Surtr doesn't classify.
+    Other,
 }
 
 impl ThrottleReason {
     /// Every reason, in display order.
-    pub const ALL: [ThrottleReason; 9] = [
+    pub const ALL: [ThrottleReason; 11] = [
         Self::Idle,
         Self::ApplicationClocks,
         Self::PowerCap,
@@ -67,6 +72,8 @@ impl ThrottleReason {
         Self::HardwareThermal,
         Self::HardwarePowerBrake,
         Self::DisplayClocks,
+        Self::CurrentLimit,
+        Self::Other,
     ];
 }
 
