@@ -115,6 +115,34 @@ pub struct Report {
     pub peak_temp_c: Option<f64>,
     /// The temperatures watched and their limits.
     pub watched: Vec<Watched>,
+    /// With `--per-core`, each core's own result, in the order tested.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub per_core: Vec<CoreResult>,
+}
+
+/// One physical core's turn in a `--per-core` run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CoreResult {
+    /// The core, as numbered by the topology (in order of first CPU).
+    pub core: u32,
+    /// The logical CPUs loaded: one, or both SMT siblings.
+    pub cpus: Vec<u32>,
+    /// How its turn ended.
+    pub outcome: Outcome,
+    /// How long it ran, in milliseconds.
+    pub duration_ms: u64,
+    /// Verified iterations per second.
+    pub rate: Option<f64>,
+    /// The highest clock seen on its CPUs during its turn, in MHz: what this
+    /// core boosts to under load.
+    pub peak_clock_mhz: Option<f64>,
+    /// The highest watched temperature during its turn, in °C.
+    pub peak_temp_c: Option<f64>,
+    /// Wrong answers.
+    pub errors: u32,
+    /// Windows' efficiency class on hybrid CPUs (higher is faster).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub efficiency: Option<u8>,
 }
 
 /// Reads the watched temperatures and per-CPU clocks; called about twice a
@@ -172,6 +200,7 @@ pub fn run(
         failures: Vec::new(),
         peak_temp_c: None,
         watched: watched.to_vec(),
+        per_core: Vec::new(),
     };
     let mut ended: Option<Outcome> = None;
     let mut finished = false;

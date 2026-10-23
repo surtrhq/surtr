@@ -1800,3 +1800,69 @@ fn runs_compare_latest_with_previous() {
     assert_ne!(v["a"]["id"], v["b"]["id"]);
     let _ = std::fs::remove_dir_all(&data);
 }
+
+#[test]
+fn per_core_tests_each_core_in_turn() {
+    let data = data_dir("per-core");
+    let out = surtr_command()
+        .env("SURTR_DATA_DIR", &data)
+        .args([
+            "--mock",
+            "--json",
+            "stress",
+            "cpu",
+            "--per-core",
+            "--each",
+            "1s",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let cores = v["per_core"].as_array().unwrap();
+    assert!(!cores.is_empty());
+    for (i, c) in cores.iter().enumerate() {
+        assert_eq!(c["core"], i);
+        assert_eq!(
+            c["cpus"].as_array().unwrap().len(),
+            1,
+            "one thread per core"
+        );
+        assert_eq!(c["outcome"]["result"], "passed");
+        assert!(c["rate"].as_f64().unwrap() > 0.0);
+    }
+    // Each core's CPU appears once in the run, one thread each.
+    assert_eq!(v["threads"].as_u64().unwrap() as usize, cores.len());
+
+    let text = String::from_utf8(
+        surtr_command()
+            .env("SURTR_DATA_DIR", &data)
+            .args(["runs", "show", "latest"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    assert!(text.contains("Passed"), "{text}");
+
+    // Per-core picks its own threads and length.
+    for args in [
+        &["--per-core", "--threads", "2"][..],
+        &["--per-core", "--duration", "1m"],
+        &["--each", "1s"],
+    ] {
+        let out = surtr_command()
+            .env("SURTR_DATA_DIR", &data)
+            .args(["--mock", "stress", "cpu"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert_ne!(out.status.code(), Some(0), "{args:?}");
+    }
+    let _ = std::fs::remove_dir_all(&data);
+}

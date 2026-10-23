@@ -214,6 +214,37 @@ pub fn report(record: &Record) -> String {
         None,
     ));
 
+    if let Some(r) = report.filter(|r| !r.per_core.is_empty()) {
+        body.push_str(
+            "<h2>Per core</h2><table><tr><th>Core</th><th>CPUs</th><th>Result</th>\
+             <th>Peak clock</th><th>Throughput</th><th>Peak temperature</th></tr>",
+        );
+        for c in &r.per_core {
+            let (result, tone) = match &c.outcome {
+                Outcome::Passed => ("passed".to_owned(), "ok"),
+                Outcome::ErrorsFound => (format!("errors ({})", c.errors), "bad"),
+                Outcome::TemperatureLimit { .. } => ("temperature limit".to_owned(), "warn"),
+                Outcome::Stopped => ("stopped".to_owned(), "warn"),
+                Outcome::WorkerFailed { .. } => ("failed".to_owned(), "bad"),
+            };
+            let cpus: Vec<String> = c.cpus.iter().map(u32::to_string).collect();
+            let _ = write!(
+                body,
+                "<tr><td>{}</td><td>{}</td><td class=\"{tone}\">{}</td><td>{}</td><td>{}</td>\
+                 <td>{}</td></tr>",
+                c.core,
+                cpus.join(", "),
+                esc(&result),
+                c.peak_clock_mhz
+                    .map_or_else(|| "-".to_owned(), |m| format!("{m:.0} MHz")),
+                c.rate
+                    .map_or_else(|| "-".to_owned(), |r| format!("{r:.0}/s")),
+                c.peak_temp_c
+                    .map_or_else(|| "-".to_owned(), |t| format!("{t:.1} °C")),
+            );
+        }
+        body.push_str("</table>");
+    }
     if let Some(r) = report.filter(|r| !r.failures.is_empty()) {
         body.push_str(
             "<h2>Wrong answers</h2><table><tr><th>When</th><th>CPU</th><th>Kernel</th>\
@@ -311,6 +342,7 @@ mod tests {
                 }],
                 peak_temp_c: Some(64.0),
                 watched: Vec::new(),
+                per_core: Vec::new(),
             }),
         }
     }

@@ -48,6 +48,10 @@ pub struct ThreadLive {
     pub clock_mhz: Option<f64>,
     /// It gave a wrong answer.
     pub failed: bool,
+    /// Not loaded right now (waiting for its turn, or done): low embers.
+    pub idle: bool,
+    /// Shown under the flame in place of the clock, for example a check mark.
+    pub note: Option<String>,
 }
 
 /// How the run ended, for the last frames.
@@ -93,6 +97,8 @@ struct Column {
     rate: Option<f64>,
     clock_mhz: Option<f64>,
     failed: bool,
+    idle: bool,
+    note: Option<String>,
 }
 
 /// Lays threads out across `width` cells: one column each with a one-cell
@@ -128,6 +134,8 @@ fn columns(threads: &[ThreadLive], width: u16) -> Vec<Column> {
                 clock_mhz: (!clocks.is_empty())
                     .then(|| clocks.iter().sum::<f64>() / clocks.len() as f64),
                 failed: group.iter().any(|t| t.failed),
+                idle: group.iter().all(|t| t.idle),
+                note: group.iter().find_map(|t| t.note.clone()),
             }
         })
         .collect()
@@ -360,6 +368,8 @@ pub fn render(buf: &mut Buffer, area: Rect, live: &Live, fire: &mut Fire, depth:
     for c in &cols {
         let f = if c.failed {
             0.25
+        } else if c.idle {
+            0.04
         } else {
             match c.rate {
                 Some(r) if fire.peak_rate > 0.0 => (r / fire.peak_rate).clamp(0.05, 1.0),
@@ -431,6 +441,8 @@ pub fn render(buf: &mut Buffer, area: Rect, live: &Live, fire: &mut Fire, depth:
                     .fg(rgb((0xff, 0x5c, 0x5c), Color::Red))
                     .add_modifier(Modifier::BOLD),
             )
+        } else if let Some(note) = c.note.as_ref().filter(|_| c.idle) {
+            (note.clone(), muted)
         } else {
             (
                 c.clock_mhz
@@ -549,6 +561,7 @@ mod tests {
                 rate: Some(400.0 - i as f64 * 20.0),
                 clock_mhz: Some(3500.0 - i as f64 * 50.0),
                 failed: i == 5,
+                ..ThreadLive::default()
             })
             .collect()
     }

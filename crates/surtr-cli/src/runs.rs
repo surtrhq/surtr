@@ -162,6 +162,8 @@ pub fn confirm(hub: &Hub, id: &str, settings: &Config) -> Result<(Report, u8), S
         threads: req.threads,
         cpus: None,
         smt: true,
+        per_core: None,
+        siblings: false,
         unmonitored: false,
         requested_by: Some(req.client.clone()),
         animate: stress::animate(false),

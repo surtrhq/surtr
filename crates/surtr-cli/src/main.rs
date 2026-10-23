@@ -435,6 +435,20 @@ enum StressCommand {
         /// No flame animation; a one-line status instead.
         #[arg(long)]
         plain: bool,
+        /// Test one physical core at a time, in turn, and report each core:
+        /// finds the weak core in per-core tuning (Curve Optimizer,
+        /// per-core undervolts), which all-core load hides.
+        #[arg(
+            long,
+            conflicts_with_all = ["duration", "threads", "cpus", "no_smt", "unmonitored"]
+        )]
+        per_core: bool,
+        /// With --per-core, how long each core runs (default 1m).
+        #[arg(long, requires = "per_core")]
+        each: Option<String>,
+        /// With --per-core, load both SMT siblings of each core.
+        #[arg(long, requires = "per_core")]
+        siblings: bool,
     },
 }
 
@@ -818,6 +832,9 @@ fn run(
                     no_smt,
                     unmonitored,
                     plain,
+                    per_core,
+                    each,
+                    siblings,
                 },
         } => {
             let ms = |text: &str| history::parse_duration_ms(text).map(Duration::from_millis);
@@ -829,6 +846,12 @@ fn run(
                 threads: *threads,
                 cpus: cpus.clone(),
                 smt: !no_smt,
+                per_core: if *per_core {
+                    Some(ms(each.as_deref().unwrap_or("1m"))?)
+                } else {
+                    None
+                },
+                siblings: *siblings,
                 unmonitored: *unmonitored,
                 requested_by: None,
                 animate: !cli.json && stress::animate(*plain),
