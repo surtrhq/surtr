@@ -13,6 +13,10 @@ change commands and JSON output.
   (or 5 °C below the CPU's own critical limit) and after 30 minutes at
   most (`[stress]` in config.toml), and refuses to run without a CPU
   temperature sensor unless `--unmonitored` (60 seconds at most).
+- `surtr stress cpu` shows the run live as one flame per CPU thread: height
+  is the thread's throughput (throttling makes it drop), color is the
+  temperature against the limit, a thread with a wrong answer turns to ash.
+  `--plain`, `--json`, `NO_COLOR` or a non-terminal give a one-line status.
 - `surtr runs`, `surtr runs show`, `surtr runs report`: every stress run is
   recorded, and a run cut short by a reset or freeze is reported as
   interrupted with what it recorded up to then; HTML reports with charts.

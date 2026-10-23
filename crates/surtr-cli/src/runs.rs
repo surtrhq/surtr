@@ -159,6 +159,7 @@ pub fn confirm(hub: &Hub, id: &str, settings: &Config) -> Result<(Report, u8), S
         threads: req.threads.unwrap_or_else(stress::all_threads),
         unmonitored: false,
         requested_by: Some(req.client.clone()),
+        animate: stress::animate(false),
     };
     eprintln!(
         "{} asks to run the {} stress test: {} threads for {}.\n\

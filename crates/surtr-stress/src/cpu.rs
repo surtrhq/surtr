@@ -84,7 +84,7 @@ const KERNELS: [Kernel; 2] = [("integer", integer), ("float", float)];
 /// The logical CPUs this process may run on (a cgroup, `taskset` or job
 /// object may allow fewer than the machine has), in order. Empty where the
 /// OS doesn't say.
-fn allowed_cpus() -> Vec<u32> {
+pub fn allowed_cpus() -> Vec<u32> {
     #[cfg(target_os = "linux")]
     {
         // SAFETY: cpu_set_t is plain data; the call only writes it.

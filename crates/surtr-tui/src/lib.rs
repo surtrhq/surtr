@@ -20,6 +20,7 @@ use surtr_view::Theme;
 
 mod app;
 mod colors;
+pub mod fire;
 mod keys;
 mod ui;
 

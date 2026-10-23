@@ -413,6 +413,9 @@ enum StressCommand {
         /// 60 seconds.
         #[arg(long)]
         unmonitored: bool,
+        /// No flame animation; a one-line status instead.
+        #[arg(long)]
+        plain: bool,
     },
 }
 
@@ -791,6 +794,7 @@ fn run(
                     duration,
                     threads,
                     unmonitored,
+                    plain,
                 },
         } => {
             let ms = |text: &str| history::parse_duration_ms(text).map(Duration::from_millis);
@@ -802,6 +806,7 @@ fn run(
                 threads: threads.unwrap_or_else(stress::all_threads),
                 unmonitored: *unmonitored,
                 requested_by: None,
+                animate: !cli.json && stress::animate(*plain),
             };
             let (report, exit) = stress::run(hub, &opts, |_| {})?;
             code.set(exit);

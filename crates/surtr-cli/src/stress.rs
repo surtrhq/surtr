@@ -7,7 +7,7 @@ use std::{
     io::{IsTerminal, Write as _},
     process::Command,
     sync::{
-        Arc,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -21,7 +21,17 @@ use surtr_stress::{
     record::{self, Journal, Record, State, Tick},
     runner::{self, Outcome, Report, Watched},
 };
+use surtr_tui::fire::{self, Ending, Live, ThreadLive};
 use surtr_view::format::iso_utc;
+
+/// Whether to show the flame view: on a terminal, unless `--plain`,
+/// `NO_COLOR` or a dumb terminal says otherwise.
+pub fn animate(plain: bool) -> bool {
+    !plain
+        && std::io::stderr().is_terminal()
+        && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty())
+        && std::env::var("TERM").map_or(true, |t| t != "dumb")
+}
 
 /// Where run records live: `runs/` in the data directory.
 pub fn runs_dir() -> Option<std::path::PathBuf> {
@@ -70,6 +80,9 @@ pub struct Options {
     pub unmonitored: bool,
     /// The AI agent that asked for the run (`surtr runs confirm`).
     pub requested_by: Option<String>,
+    /// Show the live flame view (on a terminal, unless --plain, --json or
+    /// NO_COLOR).
+    pub animate: bool,
 }
 
 /// Reads temperatures and clocks through the hub.
@@ -77,6 +90,8 @@ struct HubSensors<'a> {
     hub: &'a Hub,
     watched: Vec<String>,
     clocks: Vec<(u32, f64)>,
+    /// The live view and each worker thread's CPU, when it is shown.
+    view: Option<(Arc<Mutex<Live>>, Vec<u32>)>,
 }
 
 impl runner::Sensors for HubSensors<'_> {
@@ -96,6 +111,12 @@ impl runner::Sensors for HubSensors<'_> {
                 Some((cpu, s.value?))
             })
             .collect();
+        if let Some((live, cpus)) = &self.view {
+            let mut live = live.lock().unwrap_or_else(PoisonError::into_inner);
+            for (t, cpu) in live.threads.iter_mut().zip(cpus) {
+                t.clock_mhz = self.clocks.iter().find(|(c, _)| c == cpu).map(|(_, v)| *v);
+            }
+        }
         samples
             .into_iter()
             .filter(|s| self.watched.contains(&s.descriptor.id.0))
@@ -209,29 +230,75 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
             None
         }
     };
+    // The flame view: one flame per thread, on the CPU its worker pins to.
+    let allowed = surtr_stress::cpu::allowed_cpus();
+    let cpus: Vec<u32> = (0..opts.threads)
+        .map(|t| {
+            if allowed.is_empty() {
+                t
+            } else {
+                allowed[t as usize % allowed.len()]
+            }
+        })
+        .collect();
+    let view_done = Arc::new(AtomicBool::new(false));
+    let view = if opts.animate {
+        let state = Arc::new(Mutex::new(Live {
+            workload: "cpu".to_owned(),
+            planned_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
+            limit: watched
+                .iter()
+                .min_by(|a, b| a.stop_at.total_cmp(&b.stop_at))
+                .map(|w| (w.label.clone(), w.stop_at)),
+            threads: cpus
+                .iter()
+                .map(|c| ThreadLive {
+                    label: c.to_string(),
+                    ..ThreadLive::default()
+                })
+                .collect(),
+            ..Live::default()
+        }));
+        // Without a usable terminal, fall back to the one-line status.
+        fire::spawn(Arc::clone(&state), Arc::clone(&view_done))
+            .ok()
+            .map(|handle| (state, handle))
+    } else {
+        None
+    };
+    let live_state = view.as_ref().map(|(s, _)| Arc::clone(s));
     if let (Some(j), Some(dir)) = (&journal, runs_dir()) {
         on_start(&j.record.id);
         // An agent may ask a run to stop (`stop_stress_test`) by leaving a
         // file; stopping is always safe.
         let stop = Arc::clone(&stop);
         let file = surtr_stress::request::stop_path(&dir, &j.record.id);
+        let live = live_state.clone();
         std::thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 if file.exists() {
                     let _ = std::fs::remove_file(&file);
-                    eprintln!("\nsurtr: stop requested through MCP");
+                    match &live {
+                        Some(l) => {
+                            l.lock().unwrap_or_else(PoisonError::into_inner).message =
+                                Some("stop requested through MCP".to_owned());
+                        }
+                        None => eprintln!("\nsurtr: stop requested through MCP"),
+                    }
                     stop.store(true, Ordering::Relaxed);
                 }
                 std::thread::sleep(Duration::from_millis(500));
             }
         });
     }
-    let live = std::io::stderr().is_terminal();
+    let line = view.is_none() && std::io::stderr().is_terminal();
     let mut sensors = HubSensors {
         hub,
         watched: watched.iter().map(|w| w.id.clone()).collect(),
         clocks: Vec::new(),
+        view: live_state.clone().map(|s| (s, cpus.clone())),
     };
+    let mut last: Option<(u64, Vec<u64>)> = None;
     let report = runner::run(
         worker,
         duration,
@@ -239,10 +306,41 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
         &mut sensors,
         &stop,
         |event, temp| {
-            if let (true, Event::Progress { elapsed_ms, .. }) = (live, event) {
+            if let (true, Event::Progress { elapsed_ms, .. }) = (line, event) {
                 let shown = temp.map_or_else(String::new, |t| format!(" · {t:.1} °C"));
                 eprint!("\r  {}{shown}    ", span(*elapsed_ms));
                 let _ = std::io::stderr().flush();
+            }
+            if let Some(state) = &live_state {
+                let mut l = state.lock().unwrap_or_else(PoisonError::into_inner);
+                l.temp_c = temp.or(l.temp_c);
+                match event {
+                    Event::Progress {
+                        elapsed_ms,
+                        iterations,
+                    } => {
+                        l.elapsed_ms = *elapsed_ms;
+                        // Each thread's rate since the last progress event.
+                        if let Some((at, before)) = &last {
+                            let dt = elapsed_ms.saturating_sub(*at) as f64 / 1000.0;
+                            if dt > 0.0 {
+                                for (t, (now, then)) in
+                                    l.threads.iter_mut().zip(iterations.iter().zip(before))
+                                {
+                                    t.rate = Some(now.saturating_sub(*then) as f64 / dt);
+                                }
+                            }
+                        }
+                        last = Some((*elapsed_ms, iterations.clone()));
+                    }
+                    Event::Error { thread, .. } => {
+                        l.errors += 1;
+                        if let Some(t) = l.threads.get_mut(*thread as usize) {
+                            t.failed = true;
+                        }
+                    }
+                    Event::Started { .. } | Event::Finished { .. } => {}
+                }
             }
             let Some(j) = journal.as_mut() else { return };
             match event {
@@ -269,14 +367,24 @@ pub fn run(hub: &Hub, opts: &Options, on_start: impl FnOnce(&str)) -> Result<(Re
             }
         },
     )?;
+    if let Some((state, handle)) = view {
+        state.lock().unwrap_or_else(PoisonError::into_inner).ending = Some(match report.outcome {
+            Outcome::Passed => Ending::Passed,
+            Outcome::ErrorsFound => Ending::Failed,
+            _ => Ending::Stopped,
+        });
+        view_done.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+    }
+    // End the one-line status before anything else is printed.
+    if line {
+        eprintln!();
+    }
     if let Some(j) = journal {
         let id = j.record.id.clone();
         j.finish(report.clone(), iso_utc(Timestamp::now()))
             .map_err(|e| format!("could not save the run: {e}"))?;
         eprintln!("Saved as run {id}; `surtr runs report {id}` writes an HTML report.");
-    }
-    if live {
-        eprintln!();
     }
     let code = match report.outcome {
         Outcome::Passed => 0,
