@@ -9,6 +9,10 @@ use crate::Role;
 
 /// Shown for a value Surtr doesn't have.
 pub const MISSING: &str = "not available";
+/// Shown for a sensor that exists but gave no valid value this time, for
+/// example a Windows per-thread load PDH marked invalid (#10). Not
+/// [`MISSING`]: the sensor works, this one reading was left out.
+pub const NO_READING: &str = "no reading";
 
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 

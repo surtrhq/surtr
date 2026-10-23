@@ -514,6 +514,13 @@ impl Pdh {
                 count as usize,
             )
         };
+        // Values PDH marks invalid are left out, never mended (#10). On
+        // Windows 11 (i7-12800H, 250 ms) the raw counters behind them show
+        // per-processor idle time running ahead of the elapsed time by 30 to
+        // 500 ms, going backwards, or no time passing at all. Processor times
+        // from NtQuerySystemInformation never drop out, but they advance in
+        // 15.6 ms clock ticks and can miss most of an interval on an idle
+        // processor, so they are not better.
         items
             .iter()
             .filter(|item| {

@@ -5,7 +5,7 @@ use surtr_model::{Capabilities, Feature, Field, GpuProcess, SystemInfo, Throttle
 
 use crate::{
     Role,
-    format::{self, MISSING},
+    format::{self, MISSING, NO_READING},
     health,
 };
 
@@ -171,7 +171,7 @@ pub fn sensor_sections(samples: &[Sample]) -> Vec<Section> {
                 let role = health::level(d, v).map_or(Role::Text, |l| l.role());
                 Cell::new(format::value(d.unit, v), role)
             }
-            None => Cell::new(MISSING, Role::Missing),
+            None => Cell::new(NO_READING, Role::Missing),
         };
         let row = Row::new(d.label.clone(), cell);
         match out.last_mut() {
@@ -284,6 +284,11 @@ mod tests {
         assert_eq!(temp.cells[0].role, Role::Ok);
         let load = &sections[0].rows[2];
         assert_eq!(load.cells[0].role, Role::Text);
+        // A sensor without a value this time: a gap, not a missing feature.
+        let mut gap = samples(&MockProvider::desktop());
+        gap[2].value = None;
+        let load = &sensor_sections(&gap)[0].rows[2];
+        assert_eq!(load.cells[0], Cell::new(NO_READING, Role::Missing));
     }
 
     #[test]

@@ -66,7 +66,7 @@ fn frame(
                 format::value(d.unit, v),
                 health::level(d, v).map_or(Role::Text, |l| l.role()),
             ),
-            None => (format::MISSING.to_owned(), Role::Missing),
+            None => (format::NO_READING.to_owned(), Role::Missing),
         };
         let trend = trends
             .get(&(d.source.provider.clone(), d.id.0.clone()))

@@ -235,7 +235,7 @@ mod tests {
         for expected in [
             line("Package temperature", "55.0 °C"),
             line("VRAM used", "6.0 GiB"),
-            line("Fan speed", "not available"),
+            line("Fan speed", "no reading"),
         ] {
             assert!(out.contains(&expected), "missing {expected:?} in\n{out}");
         }

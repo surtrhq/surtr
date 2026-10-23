@@ -17,6 +17,13 @@ change commands and JSON output.
   shown as they arrive, to approve (`a`, then `y`) or deny (`d`) without
   typing the code.
 
+### Changed
+- A sensor that gave no valid value in one read now shows "no reading"
+  instead of "not available" (`surtr sensors`, `surtr watch`, the TUI), so
+  a momentary gap no longer looks like a missing feature. On Windows this is
+  the per-thread load Windows itself marks invalid now and then (#10); Surtr
+  still leaves those out rather than guess.
+
 ## [0.3.0] - 2026-10-23
 
 The stress tests tuners use: one core at a time for per-core tuning, a
