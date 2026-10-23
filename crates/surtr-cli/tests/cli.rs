@@ -811,6 +811,9 @@ fn mcp_answers_read_tools() {
         "get_throttle_reasons",
         "query_history",
         "get_diagnostics",
+        "list_stress_tests",
+        "list_runs",
+        "get_run",
     ] {
         assert!(names.contains(&tool), "{tool} missing: {names:?}");
     }

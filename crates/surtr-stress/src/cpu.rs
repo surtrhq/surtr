@@ -18,7 +18,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::event::{Event, SCHEMA};
+use crate::{
+    Isolation, Params, Workload,
+    event::{Event, SCHEMA},
+};
 
 /// Seeds each kernel cycles through, so a thread never repeats one result.
 const SEEDS: [u64; 4] = [
@@ -78,6 +81,47 @@ type Kernel = (&'static str, fn(u64) -> u64);
 
 const KERNELS: [Kernel; 2] = [("integer", integer), ("float", float)];
 
+/// The logical CPUs this process may run on (a cgroup, `taskset` or job
+/// object may allow fewer than the machine has), in order. Empty where the
+/// OS doesn't say.
+fn allowed_cpus() -> Vec<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: cpu_set_t is plain data; the call only writes it.
+        #[allow(unsafe_code)]
+        unsafe {
+            let mut set: libc::cpu_set_t = std::mem::zeroed();
+            if libc::sched_getaffinity(0, size_of::<libc::cpu_set_t>(), &raw mut set) != 0 {
+                return Vec::new();
+            }
+            (0..libc::CPU_SETSIZE as usize)
+                .filter(|&c| libc::CPU_ISSET(c, &set))
+                .filter_map(|c| u32::try_from(c).ok())
+                .collect()
+        }
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessAffinityMask};
+        let (mut process, mut system) = (0usize, 0usize);
+        // SAFETY: the pseudo-handle is always valid; both are out-pointers.
+        #[allow(unsafe_code)]
+        let ok = unsafe {
+            GetProcessAffinityMask(GetCurrentProcess(), &raw mut process, &raw mut system)
+        };
+        if ok == 0 {
+            return Vec::new();
+        }
+        (0..usize::BITS)
+            .filter(|&c| process >> c & 1 == 1)
+            .collect()
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        Vec::new()
+    }
+}
+
 /// Pins the calling thread to logical CPU `cpu`, where the OS allows it.
 /// Returns whether it worked.
 fn pin(cpu: u32) -> bool {
@@ -110,19 +154,33 @@ fn pin(cpu: u32) -> bool {
     }
 }
 
-/// What the worker was asked to do.
+/// The built-in CPU test as a [`Workload`].
 #[derive(Debug, Clone, Copy)]
-pub struct Params {
-    /// Worker threads; one per logical CPU is the usual choice.
-    pub threads: u32,
-    /// How long to run.
-    pub duration: Duration,
+pub struct Cpu;
+
+impl Workload for Cpu {
+    fn name(&self) -> &'static str {
+        "cpu"
+    }
+
+    fn description(&self) -> &'static str {
+        "Loads every CPU thread with integer and floating-point computations whose \
+         answers are known, and reports any wrong answer with its CPU."
+    }
+
+    fn isolation(&self) -> Isolation {
+        Isolation::Required
+    }
+
+    fn run(&self, params: Params, out: &mut dyn Write) -> std::io::Result<()> {
+        run(params, out)
+    }
 }
 
 /// Runs the test and writes events to `out` (the worker's standard output)
 /// until `params.duration` has passed. The host stops it earlier by killing
 /// the process.
-pub fn run(params: Params, out: &mut impl Write) -> std::io::Result<()> {
+pub fn run(params: Params, out: &mut dyn Write) -> std::io::Result<()> {
     // The answers, worked out before any heavy load.
     let expected: Vec<Vec<u64>> = KERNELS
         .iter()
@@ -134,6 +192,7 @@ pub fn run(params: Params, out: &mut impl Write) -> std::io::Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     let start = Instant::now();
     let (errors, inbox) = mpsc::channel::<Event>();
+    let allowed = Arc::new(allowed_cpus());
 
     writeln!(
         out,
@@ -149,14 +208,18 @@ pub fn run(params: Params, out: &mut impl Write) -> std::io::Result<()> {
 
     let handles: Vec<_> = (0..threads)
         .map(|t| {
-            let (expected, counts, stop, errors) = (
+            let (expected, counts, stop, errors, allowed) = (
                 Arc::clone(&expected),
                 Arc::clone(&counts),
                 Arc::clone(&stop),
                 errors.clone(),
+                Arc::clone(&allowed),
             );
             thread::spawn(move || {
-                let cpu = pin(t).then_some(t);
+                // Thread t on the t-th CPU this process may use.
+                let cpu = (!allowed.is_empty())
+                    .then(|| allowed[t as usize % allowed.len()])
+                    .filter(|&c| pin(c));
                 let mut reported = 0;
                 let mut round = 0usize;
                 while !stop.load(Ordering::Relaxed) {
@@ -230,6 +293,15 @@ fn elapsed_ms(start: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allowed_cpus_are_listed_where_the_os_says() {
+        let cpus = allowed_cpus();
+        if cfg!(any(target_os = "linux", windows)) {
+            assert!(!cpus.is_empty());
+            assert!(cpus.windows(2).all(|w| w[0] < w[1]), "{cpus:?}");
+        }
+    }
 
     #[test]
     fn kernels_are_deterministic_and_seed_dependent() {

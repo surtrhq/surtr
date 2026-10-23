@@ -306,6 +306,35 @@ impl Server {
     }
 
     #[tool(
+        description = "The built-in stress tests: name, what each does, and how it runs. \
+                       Starting one needs the owner's opt-in and a person's confirmation \
+                       (see start_stress_test).",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn list_stress_tests(&self) -> Result<CallToolResult, String> {
+        let allowed = self.stress.is_some();
+        self.answer(move |_| {
+            let tests: Vec<Value> = surtr_stress::workloads()
+                .iter()
+                .map(|w| {
+                    json!({
+                        "name": w.name(),
+                        "description": w.description(),
+                        "isolation": w.isolation(),
+                    })
+                })
+                .collect();
+            Ok(json!({ "tests": tests, "requests_allowed": allowed }))
+        })
+        .await
+    }
+
+    #[tool(
         description = "Stress runs recorded on this machine, newest first: when, how long, \
                        the result (passed, errors, temperature limit, stopped, interrupted) \
                        and the peak temperature.",

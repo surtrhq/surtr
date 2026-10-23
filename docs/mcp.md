@@ -85,6 +85,7 @@ claude mcp add --transport http surtr http://127.0.0.1:7878/mcp \
 | `get_throttle_reasons` | Why each GPU is below its potential clock right now |
 | `query_history` | Recorded history: without `sensor`, the list of recorded sensors; with `sensor`, avg/min/max per bucket over the last `minutes` (default 60, at most 7 days) |
 | `get_diagnostics` | The redacted `surtr diag` summary as Markdown |
+| `list_stress_tests` | The built-in stress tests and whether agents may request runs |
 | `list_runs` | Recorded stress runs, newest first, with result and peak temperature |
 | `get_run` | One run in full (`id` or `latest`): limits, wrong answers, per-second timeline |
 

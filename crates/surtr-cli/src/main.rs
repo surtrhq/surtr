@@ -640,15 +640,15 @@ pub(crate) fn mcp_server(hub: Arc<Hub>, db: PathBuf, stress_ms: Option<u64>) -> 
 
 /// `surtr worker`: runs a workload and streams its events on stdout.
 fn worker(workload: &str, threads: u32, duration_ms: u64) -> ExitCode {
-    if workload != "cpu" {
+    let Some(workload) = surtr_stress::workload(workload) else {
         eprintln!("surtr: unknown workload {workload}");
         return ExitCode::FAILURE;
-    }
-    let params = surtr_stress::cpu::Params {
+    };
+    let params = surtr_stress::Params {
         threads,
         duration: Duration::from_millis(duration_ms),
     };
-    match surtr_stress::cpu::run(params, &mut std::io::stdout().lock()) {
+    match workload.run(params, &mut std::io::stdout().lock()) {
         Ok(()) => ExitCode::SUCCESS,
         // The host went away (closed the pipe): nothing left to tell.
         Err(_) => ExitCode::FAILURE,
