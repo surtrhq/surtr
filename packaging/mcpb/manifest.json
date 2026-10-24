@@ -1,0 +1,31 @@
+{
+  "manifest_version": "0.3",
+  "name": "surtr",
+  "display_name": "Surtr",
+  "version": "0.0.0",
+  "description": "Read-only hardware monitor: CPU, GPU and memory details, live sensors, GPU throttle reasons and history.",
+  "long_description": "Lets the assistant ask about this machine's hardware: what is installed, what the sensors read now and over the last hours, and why a GPU is slower than it should be. Every tool is read-only. See https://github.com/surtrhq/surtr/blob/main/docs/mcp.md.",
+  "author": {
+    "name": "surtrhq",
+    "url": "https://github.com/surtrhq"
+  },
+  "homepage": "https://github.com/surtrhq/surtr",
+  "documentation": "https://github.com/surtrhq/surtr/blob/main/docs/mcp.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/surtrhq/surtr"
+  },
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["hardware", "sensors", "gpu", "monitoring"],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/surtr.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/surtr.exe",
+      "args": ["mcp"]
+    }
+  },
+  "compatibility": {
+    "platforms": ["win32"]
+  }
+}
