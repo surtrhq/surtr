@@ -1,0 +1,19 @@
+{
+  "name": "surtr",
+  "version": "0.3.0",
+  "description": "The surtr skill and MCP server: hardware details, live sensors, GPU throttle reasons and history. Needs the surtr binary on PATH.",
+  "author": {
+    "name": "surtrhq",
+    "url": "https://github.com/surtrhq"
+  },
+  "homepage": "https://github.com/surtrhq/surtr",
+  "repository": "https://github.com/surtrhq/surtr",
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["hardware", "sensors", "gpu", "monitoring", "mcp"],
+  "mcpServers": {
+    "surtr": {
+      "command": "surtr",
+      "args": ["mcp"]
+    }
+  }
+}
