@@ -33,7 +33,15 @@ By hand, Claude Code (MCP server only):
 claude mcp add surtr -- surtr mcp
 ```
 
-Claude Desktop (`claude_desktop_config.json`):
+Claude Desktop on Windows: download `surtr-<version>-x86_64-pc-windows-msvc.mcpb`
+(or `aarch64-` on Windows on Arm) from the
+[releases](https://github.com/surtrhq/surtr/releases) and open it. Claude
+Desktop installs it as an extension, binary included. There are no bundles for
+macOS yet: Claude Desktop there drops the binary's executable bit when it
+unpacks one
+([modelcontextprotocol/mcpb#294](https://github.com/modelcontextprotocol/mcpb/issues/294)).
+
+Claude Desktop by hand (`claude_desktop_config.json`):
 
 ```json
 {

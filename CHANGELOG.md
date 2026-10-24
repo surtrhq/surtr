@@ -26,6 +26,10 @@ change commands and JSON output.
 - A Claude Code plugin: `claude plugin marketplace add surtrhq/surtr`, then
   `claude plugin install surtr@surtr`, adds the skill and the MCP server in
   one step. It runs the `surtr` on your `PATH`; install that first (#63).
+- Windows releases include an MCP Bundle (`.mcpb`) for Claude Desktop:
+  open it to install the MCP server with its binary (#63). Not for macOS
+  yet, where Claude Desktop drops the binary's executable bit
+  (modelcontextprotocol/mcpb#294).
 
 ### Changed
 - `software_thermal` now reads "thermal limit (driver or firmware)": on AMD

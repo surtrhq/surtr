@@ -64,6 +64,27 @@ jobs:
           fi
           rm -rf "dist/$name"
           ls -l dist
+      # An MCP Bundle (.mcpb) for Claude Desktop and other MCPB clients: a zip
+      # with the manifest and the binary. MCPB has no CPU architecture field,
+      # so there is one bundle per target. Windows only for now: Claude
+      # Desktop on macOS drops the executable bit when it unpacks a bundle
+      # (modelcontextprotocol/mcpb#294), and there is no Claude Desktop for
+      # Linux.
+      - name: MCP bundle
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          [[ "$version" == v* ]] || version="v0.0.0"
+          bundle=dist/mcpb
+          mkdir -p "$bundle/server"
+          cp target/release/surtr.exe "$bundle/server/"
+          cp LICENSE-APACHE LICENSE-MIT "$bundle/"
+          jq --arg v "${version#v}" '.version = $v' packaging/mcpb/manifest.json > "$bundle/manifest.json"
+          out="surtr-${version}-${{ matrix.target }}.mcpb"
+          pwsh -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory('$bundle', 'dist/$out')"
+          rm -rf "$bundle"
+          ls -l dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.target }}

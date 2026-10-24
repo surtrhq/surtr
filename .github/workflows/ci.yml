@@ -41,12 +41,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
 
-  # The Claude Code plugin carries its own version; keep it with the crate's.
-  plugin:
+  packaging:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: |
+      # The Claude Code plugin carries its own version; keep it with the crate's.
+      - name: Plugin version
+        run: |
           crate="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           plugin="$(jq -r .version .claude-plugin/plugin.json)"
           [[ "$crate" == "$plugin" ]] || { echo "Cargo.toml $crate, plugin.json $plugin"; exit 1; }
+      - name: MCPB manifest
+        run: |
+          out="$(npx --yes @anthropic-ai/mcpb@2.1.2 validate packaging/mcpb/manifest.json 2>&1)"
+          echo "$out"
+          # mcpb 2.1.2 exits 0 even when validation fails.
+          grep -q "Manifest schema validation passes" <<<"$out"
