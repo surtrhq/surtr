@@ -47,11 +47,23 @@ cargo run -p surtr-cli -- --mock --json # the mock provider, as JSON
 
 ## Using Surtr with AI agents
 
-- **Coding agents with a shell** (Claude Code, Codex, Cursor, ...): install
-  the [agent skill](skills/surtr/SKILL.md). For Claude Code, copy
-  `skills/surtr` to `~/.claude/skills/surtr` (all projects) or to
-  `.claude/skills/surtr` in one project; other agents that support the Agent
-  Skills format have their own skills folder. The skill teaches the agent
+- **Claude Code**: install the plugin, which brings the skill and the MCP
+  server. Install `surtr` itself first, so it is on your `PATH`; the plugin
+  doesn't include the binary.
+
+  ```sh
+  claude plugin marketplace add surtrhq/surtr
+  claude plugin install surtr@surtr
+  ```
+
+  Inside a session, the same is `/plugin marketplace add surtrhq/surtr` and
+  `/plugin install surtr@surtr`. If `claude mcp list` shows
+  `plugin:surtr:surtr` with "Failed to connect", Claude Code can't find
+  `surtr` on its `PATH`.
+- **Other coding agents with a shell** (Codex, Cursor, ...): install the
+  [agent skill](skills/surtr/SKILL.md) into the agent's skills folder (for
+  Claude Code without the plugin, `~/.claude/skills/surtr` for all projects
+  or `.claude/skills/surtr` in one). The skill teaches the agent
   which `surtr ... --json` command answers which question, how to read the
   results, and never to run `surtr setup` without asking.
 - **Chat clients** (Claude Desktop, Cursor, VS Code and others): use the MCP

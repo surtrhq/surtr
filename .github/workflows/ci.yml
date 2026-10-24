@@ -40,3 +40,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # The Claude Code plugin carries its own version; keep it with the crate's.
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          crate="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          plugin="$(jq -r .version .claude-plugin/plugin.json)"
+          [[ "$crate" == "$plugin" ]] || { echo "Cargo.toml $crate, plugin.json $plugin"; exit 1; }

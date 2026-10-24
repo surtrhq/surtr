@@ -1,0 +1,15 @@
+{
+  "name": "surtr",
+  "owner": {
+    "name": "surtrhq",
+    "url": "https://github.com/surtrhq"
+  },
+  "description": "Surtr, the hardware monitor, for Claude Code.",
+  "plugins": [
+    {
+      "name": "surtr",
+      "source": "./",
+      "description": "The surtr skill and MCP server: hardware details, live sensors, GPU throttle reasons and history. Needs the surtr binary on PATH."
+    }
+  ]
+}

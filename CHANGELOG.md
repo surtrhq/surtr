@@ -23,12 +23,13 @@ change commands and JSON output.
   hardware (#8). GPUs whose table leaves the status out stay `unsupported`.
 - Two new throttle reasons: `current_limit` (TDC or EDC) and `other` (a
   limit the GPU reports that Surtr doesn't classify).
+- A Claude Code plugin: `claude plugin marketplace add surtrhq/surtr`, then
+  `claude plugin install surtr@surtr`, adds the skill and the MCP server in
+  one step. It runs the `surtr` on your `PATH`; install that first (#63).
 
 ### Changed
 - `software_thermal` now reads "thermal limit (driver or firmware)": on AMD
   the GPU firmware applies temperature limits.
-
-### Changed
 - A sensor that gave no valid value in one read now shows "no reading"
   instead of "not available" (`surtr sensors`, `surtr watch`, the TUI), so
   a momentary gap no longer looks like a missing feature. On Windows this is

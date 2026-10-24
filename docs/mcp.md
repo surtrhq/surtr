@@ -19,7 +19,15 @@ The easiest way: `surtr mcp config <client>` prints the exact setup for
 your `surtr`, so the client finds it even if `surtr` is not on its `PATH`.
 It only prints; it never edits the client's files.
 
-By hand, Claude Code:
+Claude Code, as a plugin (the MCP server plus the
+[agent skill](../skills/surtr/SKILL.md); `surtr` must be on your `PATH`):
+
+```sh
+claude plugin marketplace add surtrhq/surtr
+claude plugin install surtr@surtr
+```
+
+By hand, Claude Code (MCP server only):
 
 ```sh
 claude mcp add surtr -- surtr mcp
